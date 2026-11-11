@@ -131,6 +131,15 @@ export const LeadSubmissionSchema = z.object({
       sig: z.string().max(128).optional(),
     })
     .optional(),
+  consentAccepted: z.boolean().refine((val) => val === true, {
+    message: 'Consent is required before submitting your contact details.',
+  }),
+  privacyNoticeVersion: z
+    .string()
+    .max(32)
+    .optional()
+    .default('2026-11-odpc-v1')
+    .transform((val) => sanitizePlainText(val, 32) || '2026-11-odpc-v1'),
   metadata: z.record(z.unknown()).optional().default({}),
   attribution: z
     .object({

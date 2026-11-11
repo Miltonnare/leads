@@ -5,6 +5,7 @@
  * bounded timeouts, and exponential backoff retries.
  */
 
+import { sanitizeToGsm7 } from '@/core/domain';
 import type {
   MessagingProvider,
   ProviderDispatchResult,
@@ -47,9 +48,10 @@ export class AfricasTalkingAdapter implements MessagingProvider<SmsDispatchReque
     const username = process.env.AFRICASTALKING_USERNAME?.trim() || 'sandbox';
 
     const preferredSenderId = request.tenant.at_sender_id?.trim() || undefined;
+    const gsm7MessageBody = sanitizeToGsm7(request.messageBody);
     const baseRequestPayload: Record<string, unknown> = {
       to: request.toPhoneE164,
-      message: request.messageBody,
+      message: gsm7MessageBody,
       senderId: preferredSenderId ?? null,
     };
 
@@ -75,7 +77,7 @@ export class AfricasTalkingAdapter implements MessagingProvider<SmsDispatchReque
       apiKey,
       username,
       request.toPhoneE164,
-      request.messageBody,
+      gsm7MessageBody,
       preferredSenderId
     );
 
@@ -97,7 +99,7 @@ export class AfricasTalkingAdapter implements MessagingProvider<SmsDispatchReque
         apiKey,
         username,
         request.toPhoneE164,
-        request.messageBody,
+        gsm7MessageBody,
         undefined
       );
 

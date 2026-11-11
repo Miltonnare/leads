@@ -1,6 +1,6 @@
 /**
  * Meta WhatsApp Cloud API Adapter
- * Isolated Graph API v20.0 client with per-tenant credential resolution, master fallback,
+ * Isolated Graph API v26.0 client with per-tenant credential resolution, master fallback,
  * template payload builder, strict typing, bounded timeouts, and exponential backoff retries.
  */
 
@@ -36,7 +36,10 @@ export class MetaWhatsAppAdapter implements MessagingProvider<WhatsAppTemplateRe
   private readonly maxRetries: number;
 
   constructor(config: MetaWhatsAppAdapterConfig = {}) {
-    this.graphApiVersion = config.graphApiVersion || 'v20.0';
+    this.graphApiVersion =
+      config.graphApiVersion ||
+      process.env.WHATSAPP_GRAPH_API_VERSION?.trim() ||
+      'v26.0';
     this.timeoutMs = config.timeoutMs ?? 4500;
     this.maxRetries = config.maxRetries ?? 2;
   }

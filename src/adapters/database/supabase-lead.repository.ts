@@ -18,6 +18,7 @@ import type {
   IngestLeadAtomicResult,
   LeadStatus,
   OrganizationSettings,
+  OverdueSlaClaimResult,
   TenantConfig,
   WebhookProvider,
 } from '@/core/domain';
@@ -88,6 +89,8 @@ export class SupabaseLeadRepository implements LeadRepository, TenantResolver {
       p_execution_mode: params.executionMode,
       p_metadata: params.metadata as Json,
       p_attribution: params.attribution as Json,
+      p_consent_accepted: params.consentAccepted,
+      p_privacy_notice_version: params.privacyNoticeVersion,
     });
 
     if (error) {
@@ -334,6 +337,52 @@ export class SupabaseLeadRepository implements LeadRepository, TenantResolver {
       customerName: row.customer_name,
       customerPhoneE164: row.customer_phone_e164,
       serviceRequested: row.service_requested,
+    };
+  }
+
+  async recordPhoneOptOut(params: {
+    phoneE164: string;
+    organizationId?: string | null;
+    source: string;
+    reason: string;
+  }): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+
+    const { error } = await this.supabase.rpc('record_phone_opt_out', {
+      p_phone_e164: params.phoneE164,
+      p_organization_id: params.organizationId ?? null,
+      p_source: params.source,
+      p_reason: params.reason,
+    });
+
+    if (error) {
+      console.error('Failed to record phone opt-out:', error.message);
+    }
+  }
+
+  async claimOverdueSlaLeads(params: {
+    escalateAfterSeconds: number;
+    expireAfterSeconds: number;
+    limit: number;
+  }): Promise<OverdueSlaClaimResult> {
+    if (!isSupabaseConfigured()) {
+      return { expired_count: 0, escalations: [] };
+    }
+
+    const { data, error } = await this.supabase.rpc('claim_overdue_sla_leads', {
+      p_escalate_after_seconds: params.escalateAfterSeconds,
+      p_expire_after_seconds: params.expireAfterSeconds,
+      p_limit: params.limit,
+    });
+
+    if (error) {
+      throw new Error(`claim_overdue_sla_leads failed: ${error.message}`);
+    }
+
+    const parsed = (data || {}) as Partial<OverdueSlaClaimResult>;
+    return {
+      expired_count: Number(parsed.expired_count ?? 0),
+      escalations: Array.isArray(parsed.escalations) ? parsed.escalations : [],
     };
   }
 

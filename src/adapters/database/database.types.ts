@@ -93,7 +93,11 @@ export interface Database {
           owner_call_initiated_at: string | null;
           owner_clicked_call_at: string | null;
           owner_clicked_wa_at: string | null;
+          sla_escalated_at: string | null;
           customer_replied_at: string | null;
+          consent_accepted: boolean;
+          consent_accepted_at: string | null;
+          privacy_notice_version: string;
           metadata: Json;
           attribution: Json;
           created_at: string;
@@ -114,7 +118,11 @@ export interface Database {
           owner_call_initiated_at?: string | null;
           owner_clicked_call_at?: string | null;
           owner_clicked_wa_at?: string | null;
+          sla_escalated_at?: string | null;
           customer_replied_at?: string | null;
+          consent_accepted?: boolean;
+          consent_accepted_at?: string | null;
+          privacy_notice_version?: string;
           metadata?: Json;
           attribution?: Json;
           created_at?: string;
@@ -135,11 +143,42 @@ export interface Database {
           owner_call_initiated_at?: string | null;
           owner_clicked_call_at?: string | null;
           owner_clicked_wa_at?: string | null;
+          sla_escalated_at?: string | null;
           customer_replied_at?: string | null;
+          consent_accepted?: boolean;
+          consent_accepted_at?: string | null;
+          privacy_notice_version?: string;
           metadata?: Json;
           attribution?: Json;
           created_at?: string;
           updated_at?: string;
+        };
+        Relationships: [];
+      };
+      phone_opt_outs: {
+        Row: {
+          id: string;
+          phone_e164: string;
+          organization_id: string | null;
+          source: string;
+          reason: string | null;
+          opted_out_at: string;
+        };
+        Insert: {
+          id?: string;
+          phone_e164: string;
+          organization_id?: string | null;
+          source?: string;
+          reason?: string | null;
+          opted_out_at?: string;
+        };
+        Update: {
+          id?: string;
+          phone_e164?: string;
+          organization_id?: string | null;
+          source?: string;
+          reason?: string | null;
+          opted_out_at?: string;
         };
         Relationships: [];
       };
@@ -309,6 +348,8 @@ export interface Database {
           p_execution_mode: ExecutionMode;
           p_metadata: Json;
           p_attribution: Json;
+          p_consent_accepted?: boolean;
+          p_privacy_notice_version?: string;
         };
         Returns: Json;
       };
@@ -338,6 +379,23 @@ export interface Database {
           p_bucket_key: string;
           p_limit: number;
           p_window_seconds: number;
+        };
+        Returns: Json;
+      };
+      record_phone_opt_out: {
+        Args: {
+          p_phone_e164: string;
+          p_organization_id?: string | null;
+          p_source?: string;
+          p_reason?: string;
+        };
+        Returns: undefined;
+      };
+      claim_overdue_sla_leads: {
+        Args: {
+          p_escalate_after_seconds?: number;
+          p_expire_after_seconds?: number;
+          p_limit?: number;
         };
         Returns: Json;
       };

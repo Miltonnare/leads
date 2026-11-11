@@ -139,8 +139,23 @@ export interface DemoContextVerification {
 export interface IngestLeadAtomicResult {
   lead_id: string;
   is_duplicate: boolean;
+  is_opted_out?: boolean;
   existing_status: LeadStatus | null;
   tenant_config: TenantConfig;
+}
+
+export interface SlaEscalationCandidate {
+  lead_id: string;
+  customer_name: string;
+  customer_phone_e164: string;
+  service_requested: string;
+  created_at: string;
+  tenant: TenantConfig;
+}
+
+export interface OverdueSlaClaimResult {
+  expired_count: number;
+  escalations: SlaEscalationCandidate[];
 }
 
 export interface TelemetryStep {

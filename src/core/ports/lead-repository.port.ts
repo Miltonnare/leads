@@ -10,6 +10,7 @@ import type {
   IngestLeadAtomicResult,
   LeadAttribution,
   LeadStatus,
+  OverdueSlaClaimResult,
   WebhookProvider,
 } from '../domain';
 
@@ -26,6 +27,8 @@ export interface IngestLeadParams {
   serviceRequested: string;
   estimatedValueKes: number;
   executionMode: ExecutionMode;
+  consentAccepted: boolean;
+  privacyNoticeVersion: string;
   metadata: Record<string, unknown>;
   attribution: LeadAttribution;
 }
@@ -115,4 +118,17 @@ export interface LeadRepository {
     ipAddress?: string | null;
     userAgent?: string | null;
   }): Promise<OwnerClickTarget | null>;
+
+  recordPhoneOptOut(params: {
+    phoneE164: string;
+    organizationId?: string | null;
+    source: string;
+    reason: string;
+  }): Promise<void>;
+
+  claimOverdueSlaLeads(params: {
+    escalateAfterSeconds: number;
+    expireAfterSeconds: number;
+    limit: number;
+  }): Promise<OverdueSlaClaimResult>;
 }
