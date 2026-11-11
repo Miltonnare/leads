@@ -148,7 +148,11 @@ CREATE TABLE IF NOT EXISTS leads (
     owner_call_initiated_at TIMESTAMPTZ DEFAULT NULL,
     owner_clicked_call_at TIMESTAMPTZ DEFAULT NULL,
     owner_clicked_wa_at TIMESTAMPTZ DEFAULT NULL,
+    sla_escalated_at TIMESTAMPTZ DEFAULT NULL,
     customer_replied_at TIMESTAMPTZ DEFAULT NULL,
+    consent_accepted BOOLEAN NOT NULL DEFAULT true,
+    consent_accepted_at TIMESTAMPTZ DEFAULT NULL,
+    privacy_notice_version VARCHAR(32) NOT NULL DEFAULT '2026-11-odpc-v1',
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     attribution JSONB NOT NULL DEFAULT '{
         "utm_source": null,
@@ -166,6 +170,10 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS execution_mode execution_mode_enum NO
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS db_latency_ms INTEGER DEFAULT NULL;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS owner_clicked_call_at TIMESTAMPTZ DEFAULT NULL;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS owner_clicked_wa_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS sla_escalated_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS privacy_notice_version VARCHAR(32) NOT NULL DEFAULT '2026-11-odpc-v1';
 
 CREATE INDEX IF NOT EXISTS idx_leads_org_created ON leads(organization_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_leads_phone ON leads(phone_e164);
@@ -173,6 +181,27 @@ CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
 CREATE INDEX IF NOT EXISTS idx_leads_metadata_gin ON leads USING GIN(metadata);
 CREATE INDEX IF NOT EXISTS idx_leads_attribution_gin ON leads USING GIN(attribution);
 CREATE INDEX IF NOT EXISTS idx_leads_dedup ON leads(organization_id, phone_e164, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leads_sla_pending ON leads(created_at ASC)
+    WHERE execution_mode = 'LIVE_DISPATCH'
+      AND owner_clicked_call_at IS NULL
+      AND owner_clicked_wa_at IS NULL
+      AND customer_replied_at IS NULL;
+
+-- ============================================================================
+-- 3B. DND / OPT-OUT REGISTRY (ODPC & CAK STOP SUPPRESSION)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS phone_opt_outs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    phone_e164 VARCHAR(32) NOT NULL,
+    organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
+    source VARCHAR(32) NOT NULL DEFAULT 'inbound_stop',
+    reason TEXT DEFAULT NULL,
+    opted_out_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW())
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_phone_opt_outs_scope
+    ON phone_opt_outs (phone_e164, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid));
+CREATE INDEX IF NOT EXISTS idx_phone_opt_outs_phone ON phone_opt_outs(phone_e164);
 
 -- ============================================================================
 -- 4. CONVERSATIONS (TWO-WAY AUDIT TRAIL)
@@ -369,6 +398,8 @@ FOR EACH ROW EXECUTE PROCEDURE enforce_conversation_delivery_progression();
 -- ============================================================================
 
 -- 10A. Atomic Lead Ingestion, Tenant Resolution & Sliding-Window Dedup
+DROP FUNCTION IF EXISTS ingest_lead_atomic(TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT, TEXT, TEXT, TEXT, NUMERIC, execution_mode_enum, JSONB, JSONB);
+
 CREATE OR REPLACE FUNCTION ingest_lead_atomic(
     p_org_slug TEXT,
     p_org_name TEXT,
@@ -383,7 +414,9 @@ CREATE OR REPLACE FUNCTION ingest_lead_atomic(
     p_estimated_value_kes NUMERIC,
     p_execution_mode execution_mode_enum,
     p_metadata JSONB,
-    p_attribution JSONB
+    p_attribution JSONB,
+    p_consent_accepted BOOLEAN DEFAULT true,
+    p_privacy_notice_version TEXT DEFAULT '2026-11-odpc-v1'
 )
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -398,8 +431,12 @@ DECLARE
     v_dedup_cutoff TIMESTAMPTZ;
     v_lock_key BIGINT;
     v_effective_owner_phone TEXT;
+    v_is_opted_out BOOLEAN := false;
+    v_now TIMESTAMPTZ := TIMEZONE('UTC', NOW());
 BEGIN
-    -- Serialize concurrent requests for the exact same (tenant, phone_e164) pair
+    -- Serialize concurrent requests for the exact same (tenant, phone_e164) pair.
+    -- Uses transaction-scoped pg_advisory_xact_lock (safe under Supavisor transaction pooling;
+    -- never use session-level pg_advisory_lock across pooled connections).
     v_lock_key := hashtextextended(LOWER(TRIM(p_org_slug)) || ':' || TRIM(p_phone_e164), 0);
     PERFORM pg_advisory_xact_lock(v_lock_key);
 
@@ -486,6 +523,7 @@ BEGIN
         RETURN jsonb_build_object(
             'lead_id', v_existing_lead.id,
             'is_duplicate', true,
+            'is_opted_out', false,
             'existing_status', v_existing_lead.status,
             'tenant_config', jsonb_build_object(
                 'id', v_org.id,
@@ -503,7 +541,15 @@ BEGIN
         );
     END IF;
 
-    -- 4. Insert new lead atomically
+    -- 3B. Check ODPC / DND opt-out suppression registry
+    SELECT EXISTS (
+        SELECT 1
+        FROM phone_opt_outs
+        WHERE phone_e164 = p_phone_e164
+          AND (organization_id IS NULL OR organization_id = v_org.id)
+    ) INTO v_is_opted_out;
+
+    -- 4. Insert new lead atomically with ODPC consent audit trail
     INSERT INTO leads (
         organization_id,
         raw_name,
@@ -513,6 +559,9 @@ BEGIN
         estimated_value_kes,
         status,
         execution_mode,
+        consent_accepted,
+        consent_accepted_at,
+        privacy_notice_version,
         metadata,
         attribution
     )
@@ -525,6 +574,9 @@ BEGIN
         COALESCE(p_estimated_value_kes, 0.00),
         'PENDING',
         p_execution_mode,
+        COALESCE(p_consent_accepted, true),
+        CASE WHEN COALESCE(p_consent_accepted, true) THEN v_now ELSE NULL END,
+        COALESCE(NULLIF(TRIM(p_privacy_notice_version), ''), '2026-11-odpc-v1'),
         COALESCE(p_metadata, '{}'::jsonb),
         COALESCE(p_attribution, '{}'::jsonb)
     )
@@ -533,6 +585,7 @@ BEGIN
     RETURN jsonb_build_object(
         'lead_id', v_new_lead_id,
         'is_duplicate', false,
+        'is_opted_out', v_is_opted_out,
         'existing_status', NULL,
         'tenant_config', jsonb_build_object(
             'id', v_org.id,
@@ -804,11 +857,139 @@ BEGIN
 END;
 $$;
 
+-- 10E. Record Phone Opt-Out (STOP / ODPC Right to Object)
+CREATE OR REPLACE FUNCTION record_phone_opt_out(
+    p_phone_e164 TEXT,
+    p_organization_id UUID DEFAULT NULL,
+    p_source TEXT DEFAULT 'inbound_stop',
+    p_reason TEXT DEFAULT 'Customer replied STOP'
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+    INSERT INTO phone_opt_outs (phone_e164, organization_id, source, reason)
+    VALUES (TRIM(p_phone_e164), p_organization_id, p_source, p_reason)
+    ON CONFLICT (phone_e164, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid))
+    DO UPDATE SET
+        opted_out_at = TIMEZONE('UTC', NOW()),
+        source = EXCLUDED.source,
+        reason = EXCLUDED.reason;
+END;
+$$;
+
+-- 10F. Claim Overdue Unclicked Leads for SLA Escalation & Expiration
+CREATE OR REPLACE FUNCTION claim_overdue_sla_leads(
+    p_escalate_after_seconds INTEGER DEFAULT 300,
+    p_expire_after_seconds INTEGER DEFAULT 3600,
+    p_limit INTEGER DEFAULT 25
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_now TIMESTAMPTZ := TIMEZONE('UTC', NOW());
+    v_expired_count INTEGER := 0;
+    v_escalated JSONB := '[]'::jsonb;
+BEGIN
+    -- 1. Transition unengaged leads past expiration SLA to EXPIRED_NO_RESPONSE
+    WITH expired AS (
+        UPDATE leads
+        SET status = 'EXPIRED_NO_RESPONSE'
+        WHERE execution_mode = 'LIVE_DISPATCH'
+          AND status IN ('DISPATCHED_TO_OWNER', 'SENT', 'WHATSAPP_SENT', 'DELIVERED')
+          AND owner_clicked_call_at IS NULL
+          AND owner_clicked_wa_at IS NULL
+          AND customer_replied_at IS NULL
+          AND created_at < (v_now - MAKE_INTERVAL(secs => p_expire_after_seconds))
+        RETURNING id, organization_id
+    ),
+    logged AS (
+        INSERT INTO audit_logs (organization_id, action, actor_type, actor_id, details)
+        SELECT
+            organization_id,
+            'SLA_EXPIRED_NO_RESPONSE',
+            'system',
+            'sla_escalation_cron',
+            jsonb_build_object('lead_id', id, 'expired_at', v_now)
+        FROM expired
+    )
+    SELECT COUNT(*) INTO v_expired_count FROM expired;
+
+    -- 2. Atomically claim leads past escalation threshold using SKIP LOCKED
+    WITH candidates AS (
+        SELECT l.id
+        FROM leads l
+        WHERE l.execution_mode = 'LIVE_DISPATCH'
+          AND l.status IN ('DISPATCHED_TO_OWNER', 'SENT', 'WHATSAPP_SENT', 'DELIVERED')
+          AND l.owner_clicked_call_at IS NULL
+          AND l.owner_clicked_wa_at IS NULL
+          AND l.customer_replied_at IS NULL
+          AND l.sla_escalated_at IS NULL
+          AND l.created_at < (v_now - MAKE_INTERVAL(secs => p_escalate_after_seconds))
+        ORDER BY l.created_at ASC
+        LIMIT p_limit
+        FOR UPDATE OF l SKIP LOCKED
+    ),
+    claimed AS (
+        UPDATE leads l
+        SET sla_escalated_at = v_now
+        FROM candidates c
+        WHERE l.id = c.id
+        RETURNING
+            l.id AS lead_id,
+            l.organization_id,
+            l.raw_name AS customer_name,
+            l.phone_e164 AS customer_phone_e164,
+            l.service_requested,
+            l.created_at
+    )
+    SELECT COALESCE(
+        jsonb_agg(
+            jsonb_build_object(
+                'lead_id', cl.lead_id,
+                'customer_name', cl.customer_name,
+                'customer_phone_e164', cl.customer_phone_e164,
+                'service_requested', cl.service_requested,
+                'created_at', cl.created_at,
+                'tenant', jsonb_build_object(
+                    'id', o.id,
+                    'slug', o.slug,
+                    'name', o.name,
+                    'niche', o.niche,
+                    'owner_dialer_phone', o.owner_dialer_phone,
+                    'dispatch_mode', o.dispatch_mode,
+                    'whatsapp_phone_number_id', o.whatsapp_phone_number_id,
+                    'whatsapp_access_token_encrypted', o.whatsapp_access_token_encrypted,
+                    'at_sender_id', o.at_sender_id,
+                    'primary_color', o.primary_color,
+                    'settings', o.settings
+                )
+            )
+        ),
+        '[]'::jsonb
+    )
+    INTO v_escalated
+    FROM claimed cl
+    JOIN organizations o ON o.id = cl.organization_id;
+
+    RETURN jsonb_build_object(
+        'expired_count', v_expired_count,
+        'escalations', v_escalated
+    );
+END;
+$$;
+
 -- ============================================================================
 -- 11. ROW LEVEL SECURITY (RLS) POLICIES
 -- ============================================================================
 ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE phone_opt_outs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lead_dispatches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE webhook_events ENABLE ROW LEVEL SECURITY;
@@ -821,6 +1002,10 @@ CREATE POLICY service_role_all_organizations ON organizations
 
 DROP POLICY IF EXISTS service_role_all_leads ON leads;
 CREATE POLICY service_role_all_leads ON leads
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS service_role_all_phone_opt_outs ON phone_opt_outs;
+CREATE POLICY service_role_all_phone_opt_outs ON phone_opt_outs
     FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS service_role_all_conversations ON conversations;
