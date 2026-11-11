@@ -23,6 +23,8 @@ import {
   type TelemetryStep,
 } from '@/core/domain';
 
+const CUSTOM_SERVICE_SENTINEL = '__CUSTOM_SERVICE__';
+
 interface ParsedDemoConfig {
   clientName: string;
   organizationSlug: string;
@@ -30,6 +32,7 @@ interface ParsedDemoConfig {
   brandColorRgb: string;
   ownerPhone: string;
   niche: NicheKey;
+  customServices?: string[];
   exp?: number;
   sig?: string;
   hasSignatureParams: boolean;
@@ -59,6 +62,7 @@ function parseSanitizedDemoParams(searchParams: URLSearchParams): ParsedDemoConf
     color: searchParams.get('color') ?? undefined,
     phone: searchParams.get('phone') ?? undefined,
     niche: searchParams.get('niche') ?? undefined,
+    services: searchParams.get('services') ?? undefined,
     exp: searchParams.get('exp') ?? undefined,
     sig: searchParams.get('sig') ?? undefined,
   });
@@ -84,6 +88,7 @@ function parseSanitizedDemoParams(searchParams: URLSearchParams): ParsedDemoConf
     brandColorRgb: hexToRgbTriplet(brandColorHex),
     ownerPhone: data.phone,
     niche: data.niche,
+    customServices: data.services,
     exp: data.exp,
     sig: data.sig,
     hasSignatureParams: Boolean(data.sig && data.exp),
@@ -113,6 +118,13 @@ export function ChameleonContent() {
     [demoConfig.niche, demoConfig.clientName]
   );
 
+  const serviceOptions = useMemo(
+    () => demoConfig.customServices ?? activeNiche.services,
+    [demoConfig.customServices, activeNiche.services]
+  );
+
+  const defaultServiceOption = serviceOptions[0] || activeNiche.defaultService;
+
   const clientInitials = useMemo(
     () => getInitials(demoConfig.clientName),
     [demoConfig.clientName]
@@ -123,7 +135,9 @@ export function ChameleonContent() {
   const [nameTouched, setNameTouched] = useState(false);
   const [phone, setPhone] = useState('');
   const [phoneTouched, setPhoneTouched] = useState(false);
-  const [serviceRequested, setServiceRequested] = useState(activeNiche.defaultService);
+  const [serviceSelected, setServiceSelected] = useState(defaultServiceOption);
+  const [customServiceText, setCustomServiceText] = useState('');
+  const [customServiceTouched, setCustomServiceTouched] = useState(false);
   const [consentAccepted, setConsentAccepted] = useState(false);
   const [consentTouched, setConsentTouched] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -135,23 +149,33 @@ export function ChameleonContent() {
   const [telemetry, setTelemetry] = useState<TelemetryStep[]>([]);
 
   useEffect(() => {
-    setServiceRequested(activeNiche.defaultService);
-  }, [activeNiche.defaultService]);
+    setServiceSelected(defaultServiceOption);
+  }, [defaultServiceOption]);
+
+  const isCustomService = serviceSelected === CUSTOM_SERVICE_SENTINEL;
+  const resolvedServiceRequested = isCustomService
+    ? customServiceText.trim()
+    : serviceSelected;
 
   const phoneValidation = useMemo(() => validateAndFormatPhone(phone), [phone]);
   const isNameValid = fullName.trim().length >= 2;
+  const isServiceValid = resolvedServiceRequested.length >= 2;
   const showNameError = nameTouched && !isNameValid;
   const showPhoneError = phoneTouched && phone.trim().length > 0 && !phoneValidation.isValid;
   const showPhoneEmptyError = phoneTouched && phone.trim().length === 0;
+  const showCustomServiceError = isCustomService && customServiceTouched && !isServiceValid;
   const showConsentError = consentTouched && !consentAccepted;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setNameTouched(true);
     setPhoneTouched(true);
+    if (isCustomService) {
+      setCustomServiceTouched(true);
+    }
     setConsentTouched(true);
 
-    if (!isNameValid || !phoneValidation.isValid || !consentAccepted) {
+    if (!isNameValid || !phoneValidation.isValid || !isServiceValid || !consentAccepted) {
       return;
     }
 
@@ -176,7 +200,7 @@ export function ChameleonContent() {
         body: JSON.stringify({
           fullName: fullName.trim(),
           phone: phoneValidation.e164,
-          serviceRequested,
+          serviceRequested: resolvedServiceRequested,
           organizationSlug: demoConfig.organizationSlug,
           ownerPhone: demoConfig.ownerPhone,
           demoContext: {
@@ -243,6 +267,9 @@ export function ChameleonContent() {
     setSubmitResult(null);
     setFullName('');
     setPhone('');
+    setServiceSelected(defaultServiceOption);
+    setCustomServiceText('');
+    setCustomServiceTouched(false);
     setConsentAccepted(false);
     setNameTouched(false);
     setPhoneTouched(false);
@@ -520,7 +547,7 @@ export function ChameleonContent() {
                     )}
                   </div>
 
-                  {/* Service Requirement Select */}
+                  {/* Service Requirement Select + Custom Free-Text Option */}
                   <div className="space-y-1.5">
                     <label htmlFor="lead-service" className="block text-xs font-medium text-ink">
                       Project / Service Requirement
@@ -528,18 +555,52 @@ export function ChameleonContent() {
                     <div className="relative">
                       <select
                         id="lead-service"
-                        value={serviceRequested}
-                        onChange={(e) => setServiceRequested(e.target.value)}
+                        value={serviceSelected}
+                        onChange={(e) => {
+                          setServiceSelected(e.target.value);
+                          if (e.target.value !== CUSTOM_SERVICE_SENTINEL) {
+                            setCustomServiceTouched(false);
+                          }
+                        }}
                         className="w-full h-11 pl-3.5 pr-10 rounded-xl text-sm text-ink bg-surface border border-surface-border appearance-none transition-all focus:outline-none focus:border-brand focus:ring-4 focus:ring-brand/15"
                       >
-                        {activeNiche.services.map((svc) => (
+                        {serviceOptions.map((svc) => (
                           <option key={svc} value={svc}>
                             {svc}
                           </option>
                         ))}
+                        <option value={CUSTOM_SERVICE_SENTINEL}>
+                          Other (Specify custom requirement)
+                        </option>
                       </select>
                       <ChevronDown className="w-4 h-4 text-ink-muted pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2" />
                     </div>
+
+                    {isCustomService && (
+                      <div className="pt-1.5 space-y-1">
+                        <input
+                          id="lead-custom-service"
+                          type="text"
+                          required
+                          maxLength={150}
+                          value={customServiceText}
+                          onChange={(e) => setCustomServiceText(e.target.value)}
+                          onBlur={() => setCustomServiceTouched(true)}
+                          placeholder="Describe your specific project or service requirement..."
+                          aria-invalid={showCustomServiceError}
+                          className={`w-full h-11 px-3.5 rounded-xl text-sm text-ink placeholder:text-ink-muted/50 border transition-all focus:outline-none ${
+                            showCustomServiceError
+                              ? 'bg-[#FFF1F2] border-rose-300 focus:border-rose-400 focus:ring-4 focus:ring-rose-100'
+                              : 'bg-surface border-surface-border focus:border-brand focus:ring-4 focus:ring-brand/15'
+                          }`}
+                        />
+                        {showCustomServiceError && (
+                          <p className="text-xs text-rose-700">
+                            Please describe your project requirement (minimum 2 characters).
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Unbundled ODPC Affirmative Consent Checkbox */}

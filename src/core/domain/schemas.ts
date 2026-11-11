@@ -95,6 +95,19 @@ export const DemoQueryParamsSchema = z.object({
       const clean = val.trim();
       return /^[0-9a-fA-F]{64}$/.test(clean) ? clean.toLowerCase() : clean;
     }),
+  services: z
+    .string()
+    .max(600)
+    .optional()
+    .transform((val) => {
+      if (!val) return undefined;
+      const list = val
+        .split(',')
+        .map((item) => sanitizePlainText(item, 80))
+        .filter((item) => item.length >= 2)
+        .slice(0, 8);
+      return list.length > 0 ? list : undefined;
+    }),
 });
 
 export const LeadSubmissionSchema = z.object({

@@ -115,11 +115,14 @@ export function getNichePreset(niche: NicheKey | string, clientName: string): Ni
       'Our automated intake system locks your pricing and routes your request to a technical lead in under 15 seconds.',
     badge: 'Zero-Latency Verified Intake Engine',
     services: [
-      'Standard Turnkey Consultation',
-      'Priority Engineering Dispatch',
-      'Commercial Project Feasibility Audit',
+      'Project Quotation & Scope Estimate',
+      'Site Survey & Technical Assessment',
+      'Turnkey Supply & Installation',
+      'Equipment Maintenance, Repair & Retrofit',
+      'Priority Engineering Consultation',
+      'Commercial Feasibility & Compliance Audit',
     ],
-    defaultService: 'Standard Turnkey Consultation',
+    defaultService: 'Project Quotation & Scope Estimate',
     cta: 'Get Instant Quote via WhatsApp',
     estimatedValueKes: 250000,
   };
