@@ -124,6 +124,8 @@ export function ChameleonContent() {
   const [phone, setPhone] = useState('');
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [serviceRequested, setServiceRequested] = useState(activeNiche.defaultService);
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [consentTouched, setConsentTouched] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'form' | 'telemetry'>('form');
 
@@ -141,13 +143,15 @@ export function ChameleonContent() {
   const showNameError = nameTouched && !isNameValid;
   const showPhoneError = phoneTouched && phone.trim().length > 0 && !phoneValidation.isValid;
   const showPhoneEmptyError = phoneTouched && phone.trim().length === 0;
+  const showConsentError = consentTouched && !consentAccepted;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setNameTouched(true);
     setPhoneTouched(true);
+    setConsentTouched(true);
 
-    if (!isNameValid || !phoneValidation.isValid) {
+    if (!isNameValid || !phoneValidation.isValid || !consentAccepted) {
       return;
     }
 
@@ -183,6 +187,8 @@ export function ChameleonContent() {
             exp: demoConfig.exp,
             sig: demoConfig.sig,
           },
+          consentAccepted,
+          privacyNoticeVersion: '2026-11-odpc-v1',
           metadata: {
             niche: demoConfig.niche,
             source: 'web_intake',
@@ -237,8 +243,10 @@ export function ChameleonContent() {
     setSubmitResult(null);
     setFullName('');
     setPhone('');
+    setConsentAccepted(false);
     setNameTouched(false);
     setPhoneTouched(false);
+    setConsentTouched(false);
   };
 
   return (
@@ -534,6 +542,47 @@ export function ChameleonContent() {
                     </div>
                   </div>
 
+                  {/* Unbundled ODPC Affirmative Consent Checkbox */}
+                  <div
+                    className={`rounded-xl border p-3 transition-colors ${
+                      showConsentError
+                        ? 'bg-[#FFF1F2] border-rose-300'
+                        : 'bg-canvas border-surface-border'
+                    }`}
+                  >
+                    <label className="flex items-start gap-2.5 cursor-pointer text-xs text-ink-muted leading-relaxed">
+                      <input
+                        type="checkbox"
+                        checked={consentAccepted}
+                        onChange={(e) => {
+                          setConsentAccepted(e.target.checked);
+                          setConsentTouched(true);
+                        }}
+                        className="mt-0.5 h-4 w-4 rounded border-surface-border accent-brand focus:ring-brand/25 shrink-0"
+                      />
+                      <span>
+                        I consent to{' '}
+                        <strong className="text-ink font-medium">{demoConfig.clientName}</strong>{' '}
+                        contacting me via WhatsApp, SMS, or phone regarding this quote, and
+                        acknowledge the{' '}
+                        <a
+                          href={`/privacy?client=${encodeURIComponent(demoConfig.clientName)}&phone=${encodeURIComponent(demoConfig.ownerPhone)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-brand font-medium hover:underline"
+                        >
+                          Privacy &amp; Data Processing Notice
+                        </a>
+                        .
+                      </span>
+                    </label>
+                    {showConsentError && (
+                      <p className="text-xs text-rose-700 mt-1.5 pl-6">
+                        Please confirm consent before submitting your request.
+                      </p>
+                    )}
+                  </div>
+
                   {/* Primary Brand CTA */}
                   <div className="pt-2">
                     <button
@@ -613,6 +662,24 @@ export function ChameleonContent() {
                   </div>
                 </div>
 
+                {/* Compact Strategy & Mode Strip */}
+                {submitResult && (
+                  <div className="grid grid-cols-2 gap-2.5 text-xs">
+                    <div className="px-3 py-2 rounded-xl bg-surface border border-surface-border flex items-center justify-between gap-2">
+                      <span className="text-ink-muted font-medium">Execution</span>
+                      <span className="font-mono font-semibold text-ink">
+                        {submitResult.executionMode || '—'}
+                      </span>
+                    </div>
+                    <div className="px-3 py-2 rounded-xl bg-surface border border-surface-border flex items-center justify-between gap-2">
+                      <span className="text-ink-muted font-medium">Dispatch</span>
+                      <span className="font-mono font-semibold text-ink">
+                        {submitResult.dispatchMode || '—'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Hairline Table of Pipeline Stages */}
                 <div className="border border-surface-border rounded-xl overflow-hidden bg-surface">
                   <div className="grid grid-cols-[1fr_auto] px-3.5 py-2 bg-canvas border-b border-surface-border text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
@@ -674,7 +741,7 @@ export function ChameleonContent() {
                           ? `/r/call/${submitResult.leadId}`
                           : `tel:${demoConfig.ownerPhone}`
                       }
-                      className="min-h-[44px] px-3.5 py-2.5 rounded-xl bg-canvas text-ink border border-surface-border font-medium text-xs flex items-center justify-center gap-2 hover:bg-slate-100 transition-colors"
+                      className="min-h-[44px] px-3.5 py-2.5 rounded-xl bg-canvas text-ink border border-surface-border font-medium text-xs flex items-center justify-center gap-2 hover:bg-surface shadow-sm transition-colors"
                     >
                       <PhoneCall className="w-3.5 h-3.5 text-brand" />
                       <span>Test Owner 1-Tap Dialer</span>

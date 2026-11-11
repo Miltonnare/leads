@@ -5,6 +5,7 @@ import { getAppServices } from '@/lib/container';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+export const maxDuration = 30;
 
 const WaterfallCallbackSchema = z.object({
   leadId: z.string().uuid(),
@@ -14,7 +15,79 @@ const WaterfallCallbackSchema = z.object({
   serviceRequested: z.string().min(1),
 });
 
-function isAuthorizedInternalCall(req: NextRequest): boolean {
+function verifyHmacJwtSignature(
+  token: string,
+  signingKey: string,
+  rawBody: string
+): boolean {
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+
+  const [headerB64, payloadB64, sigB64] = parts;
+  const signingInput = `${headerB64}.${payloadB64}`;
+
+  const expectedSig = crypto
+    .createHmac('sha256', signingKey)
+    .update(signingInput, 'utf8')
+    .digest('base64url');
+
+  const actualBuf = Buffer.from(sigB64, 'utf8');
+  const expectedBuf = Buffer.from(expectedSig, 'utf8');
+  if (
+    actualBuf.length !== expectedBuf.length ||
+    !crypto.timingSafeEqual(actualBuf, expectedBuf)
+  ) {
+    return false;
+  }
+
+  try {
+    const claims = JSON.parse(
+      Buffer.from(payloadB64, 'base64url').toString('utf8')
+    ) as {
+      iss?: string;
+      exp?: number;
+      nbf?: number;
+      body?: string;
+    };
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (claims.iss !== 'Upstash') return false;
+    if (typeof claims.exp === 'number' && nowSec > claims.exp) return false;
+    if (typeof claims.nbf === 'number' && nowSec < claims.nbf) return false;
+
+    if (claims.body) {
+      const actualBodyHash = crypto
+        .createHash('sha256')
+        .update(rawBody, 'utf8')
+        .digest('base64url');
+      if (claims.body !== actualBodyHash) return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isAuthorizedInternalCall(req: NextRequest, rawBody: string): boolean {
+  // 1. Prefer Upstash QStash cryptographic JWT signature verification
+  const qstashSig = req.headers.get('upstash-signature')?.trim();
+  const currentKey = process.env.QSTASH_CURRENT_SIGNING_KEY?.trim();
+  const nextKey = process.env.QSTASH_NEXT_SIGNING_KEY?.trim();
+
+  if (qstashSig && (currentKey || nextKey)) {
+    const validCurrent = currentKey
+      ? verifyHmacJwtSignature(qstashSig, currentKey, rawBody)
+      : false;
+    const validNext = nextKey
+      ? verifyHmacJwtSignature(qstashSig, nextKey, rawBody)
+      : false;
+    if (validCurrent || validNext) {
+      return true;
+    }
+  }
+
+  // 2. Fallback: constant-time verification of dedicated internal secret token
   const configured = process.env.INTERNAL_CALLBACK_SECRET?.trim();
   if (!configured) return false;
 
@@ -26,15 +99,17 @@ function isAuthorizedInternalCall(req: NextRequest): boolean {
 
 /**
  * POST /api/internal/waterfall-sms
- * Optional QStash delayed callback for WATERFALL_PROD SMS fallback.
+ * Delayed QStash / internal callback for WATERFALL_PROD SMS fallback.
  */
 export async function POST(req: NextRequest) {
-  if (!isAuthorizedInternalCall(req)) {
+  const rawBody = await req.text();
+
+  if (!isAuthorizedInternalCall(req, rawBody)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const parsed = WaterfallCallbackSchema.safeParse(await req.json());
+    const parsed = WaterfallCallbackSchema.safeParse(JSON.parse(rawBody));
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid waterfall payload' }, { status: 400 });
     }

@@ -1,35 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { UuidSchema } from '@/core/domain';
+import { decodeLeadIdentifier } from '@/core/domain';
 import { getAppServices } from '@/lib/container';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const ChannelSchema = z.enum(['call', 'wa']);
+const ChannelSchema = z.enum(['call', 'c', 'wa', 'w']);
 
 /**
  * GET /r/[channel]/[leadId]
- * 1-Tap SLA Click Tracker:
- *   - /r/call/[leadId] -> Logs OWNER_CLICKED_CALL timestamp, then 302 redirects to tel:+254...
- *   - /r/wa/[leadId]   -> Logs OWNER_CLICKED_WA timestamp, then 302 redirects to https://wa.me/254...?text=...
+ * 1-Tap SLA Click Tracker (supports both full UUID & 22-char compact UUIDs, and /call|/c or /wa|/w):
+ *   - /r/call/[leadId] or /r/c/[shortId] -> Logs OWNER_CLICKED_CALL, 302 -> tel:+254...
+ *   - /r/wa/[leadId]   or /r/w/[shortId] -> Logs OWNER_CLICKED_WA, 302 -> https://wa.me/254...?text=...
  */
 export async function GET(
   req: NextRequest,
   context: { params: { channel: string; leadId: string } }
 ) {
   const channelParse = ChannelSchema.safeParse(context.params.channel?.toLowerCase());
-  const leadIdParse = UuidSchema.safeParse(context.params.leadId);
+  const resolvedLeadId = context.params.leadId
+    ? decodeLeadIdentifier(context.params.leadId)
+    : null;
 
-  if (!channelParse.success || !leadIdParse.success) {
+  if (!channelParse.success || !resolvedLeadId) {
     return NextResponse.json(
       { error: 'Invalid tracking link parameters' },
       { status: 400 }
     );
   }
 
-  const channel = channelParse.data;
-  const leadId = leadIdParse.data;
+  const channel: 'call' | 'wa' =
+    channelParse.data === 'call' || channelParse.data === 'c' ? 'call' : 'wa';
 
   try {
     const ipAddress =
@@ -41,7 +43,7 @@ export async function GET(
 
     const { repository } = getAppServices();
     const target = await repository.recordOwnerClickSla({
-      leadId,
+      leadId: resolvedLeadId,
       channel,
       ipAddress,
       userAgent,

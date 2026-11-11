@@ -5,7 +5,12 @@
  */
 
 import crypto from 'crypto';
-import { validateAndFormatPhone, type DispatchStatus, type LeadStatus } from '@/core/domain';
+import {
+  isOptOutKeyword,
+  validateAndFormatPhone,
+  type DispatchStatus,
+  type LeadStatus,
+} from '@/core/domain';
 import type { LeadRepository, TenantResolver } from '@/core/ports';
 
 interface MetaWebhookBody {
@@ -35,6 +40,7 @@ interface MetaWebhookBody {
 
 export interface AfricasTalkingWebhookInput {
   from?: string;
+  to?: string;
   phoneNumber?: string;
   sender?: string;
   text?: string;
@@ -44,6 +50,9 @@ export interface AfricasTalkingWebhookInput {
   status?: string;
   networkCode?: string;
   failureReason?: string;
+  retryCount?: string;
+  date?: string;
+  linkId?: string;
 }
 
 export class WebhookProcessorService {
@@ -55,13 +64,21 @@ export class WebhookProcessorService {
   verifyMetaSignature(rawBody: string, signatureHeader: string | null): boolean {
     const appSecret = process.env.WHATSAPP_APP_SECRET?.trim();
     if (!appSecret) {
-      return true;
+      // Fail closed in production unless explicitly permitted for dry-run demos
+      return (
+        process.env.NODE_ENV !== 'production' ||
+        process.env.ALLOW_UNSIGNED_WEBHOOKS === 'true'
+      );
     }
     if (!signatureHeader || !signatureHeader.startsWith('sha256=')) {
       return false;
     }
 
     const clientSig = signatureHeader.slice(7);
+    if (!/^[0-9a-f]{64}$/i.test(clientSig)) {
+      return false;
+    }
+
     const expectedSig = crypto
       .createHmac('sha256', appSecret)
       .update(rawBody, 'utf8')
@@ -70,10 +87,10 @@ export class WebhookProcessorService {
     const clientBuf = Buffer.from(clientSig, 'hex');
     const expectedBuf = Buffer.from(expectedSig, 'hex');
 
-    if (clientBuf.length !== expectedBuf.length) {
-      return false;
-    }
-    return crypto.timingSafeEqual(clientBuf, expectedBuf);
+    return (
+      clientBuf.length === expectedBuf.length &&
+      crypto.timingSafeEqual(clientBuf, expectedBuf)
+    );
   }
 
   async processWhatsAppWebhook(
@@ -123,6 +140,15 @@ export class WebhookProcessorService {
             organizationIdFilter: orgIdFilter,
             rawPayload: msg as unknown as Record<string, unknown>,
           });
+
+          if (!outcome.duplicate && isOptOutKeyword(messageBody)) {
+            await this.repository.recordPhoneOptOut({
+              phoneE164: senderE164,
+              organizationId: orgIdFilter,
+              source: 'whatsapp_stop',
+              reason: `Inbound WhatsApp opt-out: ${messageBody.slice(0, 64)}`,
+            });
+          }
 
           if (outcome.duplicate) {
             duplicateEvents++;
@@ -186,8 +212,10 @@ export class WebhookProcessorService {
         dispatchStatus: mapping.dispatchStatus,
         rawPayload: {
           status,
+          phoneNumber: input.phoneNumber ?? null,
           networkCode: input.networkCode ?? null,
           failureReason: input.failureReason ?? null,
+          retryCount: input.retryCount ?? null,
           receivedAt: new Date().toISOString(),
         },
       });
@@ -220,10 +248,22 @@ export class WebhookProcessorService {
         messageBody: text,
         rawPayload: {
           from: senderE164,
+          to: input.to ?? null,
           text,
+          date: input.date ?? null,
+          linkId: input.linkId ?? null,
           networkCode: input.networkCode ?? null,
         },
       });
+
+      if (!outcome.duplicate && isOptOutKeyword(text)) {
+        await this.repository.recordPhoneOptOut({
+          phoneE164: senderE164,
+          organizationId: null,
+          source: 'sms_stop',
+          reason: `Inbound SMS opt-out: ${text.slice(0, 64)}`,
+        });
+      }
 
       return { mode: 'INBOUND_SMS', duplicate: outcome.duplicate };
     }

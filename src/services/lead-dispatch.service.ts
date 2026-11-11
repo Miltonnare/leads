@@ -5,6 +5,9 @@
  */
 
 import {
+  formatCompactCustomerSms,
+  formatCompactOwnerAlertSms,
+  formatSlaEscalationSms,
   getNichePreset,
   isLeadAlreadyDeliveredOrReplied,
   LeadSubmissionSchema,
@@ -142,6 +145,8 @@ export class LeadDispatchService {
       serviceRequested: input.serviceRequested,
       estimatedValueKes: nichePreset.estimatedValueKes,
       executionMode,
+      consentAccepted: input.consentAccepted,
+      privacyNoticeVersion: input.privacyNoticeVersion,
       metadata: {
         ...input.metadata,
         niche: nicheKey,
@@ -205,6 +210,7 @@ export class LeadDispatchService {
 
     const tenant = ingestResult.tenant_config;
     const leadId = ingestResult.lead_id;
+    const isOptedOut = Boolean(ingestResult.is_opted_out);
 
     // 7. Offload parallel/waterfall dispatches into background task (waitUntil / QStash)
     const backgroundTask =
@@ -227,6 +233,7 @@ export class LeadDispatchService {
             appBaseUrl: meta.appBaseUrl,
             dbLatencyMs,
             intakeLatencyMs,
+            isOptedOut,
           });
 
     const isSandbox = executionMode === 'SANDBOX_SIMULATION';
@@ -301,6 +308,7 @@ export class LeadDispatchService {
     appBaseUrl: string;
     dbLatencyMs: number;
     intakeLatencyMs: number;
+    isOptedOut: boolean;
   }): Promise<void> {
     const {
       leadId,
@@ -311,10 +319,11 @@ export class LeadDispatchService {
       appBaseUrl,
       dbLatencyMs,
       intakeLatencyMs,
+      isOptedOut,
     } = params;
 
-    const autoWa = tenant.settings?.auto_dispatch_whatsapp ?? true;
-    const autoSms = tenant.settings?.auto_dispatch_sms ?? true;
+    const autoWa = !isOptedOut && (tenant.settings?.auto_dispatch_whatsapp ?? true);
+    const autoSms = !isOptedOut && (tenant.settings?.auto_dispatch_sms ?? true);
 
     const ownerAlertPromise = this.sendAndRecordOwnerAlert({
       leadId,
@@ -536,9 +545,11 @@ export class LeadDispatchService {
     customerName: string;
     serviceRequested: string;
   }): Promise<ProviderDispatchResult> {
-    const messageBody =
-      `Hello ${params.customerName}, ${params.tenant.name} has received your request for "${params.serviceRequested}". ` +
-      `A project engineer is reviewing your specs right now. Reply here for urgent inquiries.`;
+    const messageBody = formatCompactCustomerSms({
+      customerName: params.customerName,
+      clientName: params.tenant.name,
+      serviceRequested: params.serviceRequested,
+    });
 
     const result = await this.smsProvider.send({
       leadId: params.leadId,
@@ -585,17 +596,14 @@ export class LeadDispatchService {
     serviceRequested: string;
     appBaseUrl: string;
   }): Promise<ProviderDispatchResult> {
-    const cleanBase = params.appBaseUrl.replace(/\/$/, '');
-    const callTrackUrl = `${cleanBase}/r/call/${params.leadId}`;
-    const waTrackUrl = `${cleanBase}/r/wa/${params.leadId}`;
-
-    const ownerAlertMessage =
-      `[HOT LEAD - ${params.tenant.name}]\n` +
-      `Name: ${params.customerName}\n` +
-      `Req: ${params.serviceRequested}\n` +
-      `Phone: ${params.customerPhoneE164}\n` +
-      `1-Tap Call: ${callTrackUrl}\n` +
-      `1-Tap WhatsApp: ${waTrackUrl}`;
+    const ownerAlertMessage = formatCompactOwnerAlertSms({
+      leadId: params.leadId,
+      clientName: params.tenant.name,
+      customerName: params.customerName,
+      customerPhoneE164: params.customerPhoneE164,
+      serviceRequested: params.serviceRequested,
+      appBaseUrl: params.appBaseUrl,
+    });
 
     const result = await this.smsProvider.send({
       leadId: params.leadId,
@@ -661,5 +669,62 @@ export class LeadDispatchService {
       console.warn('QStash scheduling failed, falling back to waitUntil delay:', err);
       return false;
     }
+  }
+
+  /**
+   * Escalates unclicked leads past 5m SLA and expires unengaged leads past 1h SLA.
+   */
+  async runSlaEscalationSweep(params: {
+    appBaseUrl: string;
+    escalateAfterSeconds?: number;
+    expireAfterSeconds?: number;
+    limit?: number;
+  }): Promise<{ expiredCount: number; escalatedCount: number }> {
+    const claim = await this.repository.claimOverdueSlaLeads({
+      escalateAfterSeconds: params.escalateAfterSeconds ?? 300,
+      expireAfterSeconds: params.expireAfterSeconds ?? 3600,
+      limit: params.limit ?? 25,
+    });
+
+    if (claim.escalations.length === 0) {
+      return { expiredCount: claim.expired_count, escalatedCount: 0 };
+    }
+
+    await Promise.allSettled(
+      claim.escalations.map(async (item) => {
+        const messageBody = formatSlaEscalationSms({
+          leadId: item.lead_id,
+          clientName: item.tenant.name,
+          customerName: item.customer_name,
+          customerPhoneE164: item.customer_phone_e164,
+          appBaseUrl: params.appBaseUrl,
+        });
+
+        const result = await this.smsProvider.send({
+          leadId: item.lead_id,
+          toPhoneE164: item.tenant.owner_dialer_phone,
+          messageBody,
+          channel: 'OWNER_DIALER_ALERT',
+          tenant: item.tenant,
+        });
+
+        await this.repository.recordDispatch({
+          leadId: item.lead_id,
+          channel: 'OWNER_DIALER_ALERT',
+          destination: item.tenant.owner_dialer_phone,
+          providerMessageId: result.providerMessageId,
+          status: result.success ? 'SUCCESS' : 'FAILED',
+          latencyMs: result.latencyMs,
+          requestPayload: { ...result.requestPayload, escalation: true },
+          responsePayload: result.responsePayload,
+          errorMessage: result.errorMessage,
+        });
+      })
+    );
+
+    return {
+      expiredCount: claim.expired_count,
+      escalatedCount: claim.escalations.length,
+    };
   }
 }

@@ -4,6 +4,8 @@ import { getAppServices } from '@/lib/container';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+// Ensures Vercel Fluid Compute / waitUntil async dispatches & waterfall timers never clip at 10s
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {

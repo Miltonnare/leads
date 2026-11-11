@@ -8,7 +8,12 @@ export const dynamic = 'force-dynamic';
 
 function verifyAfricasTalkingSecret(req: NextRequest): boolean {
   const secret = process.env.AFRICASTALKING_WEBHOOK_SECRET?.trim();
-  if (!secret) return true;
+  if (!secret) {
+    return (
+      process.env.NODE_ENV !== 'production' ||
+      process.env.ALLOW_UNSIGNED_WEBHOOKS === 'true'
+    );
+  }
 
   const provided =
     req.headers.get('x-at-webhook-secret')?.trim() ||
@@ -37,12 +42,16 @@ export async function POST(req: NextRequest) {
       const formData = await req.formData();
       payload = {
         from: formData.get('from')?.toString(),
+        to: formData.get('to')?.toString(),
         phoneNumber: formData.get('phoneNumber')?.toString(),
         text: formData.get('text')?.toString(),
         id: formData.get('id')?.toString(),
         status: formData.get('status')?.toString(),
         networkCode: formData.get('networkCode')?.toString(),
         failureReason: formData.get('failureReason')?.toString(),
+        retryCount: formData.get('retryCount')?.toString(),
+        date: formData.get('date')?.toString(),
+        linkId: formData.get('linkId')?.toString(),
       };
     } else {
       payload = (await req.json()) as AfricasTalkingWebhookInput;
