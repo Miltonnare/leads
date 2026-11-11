@@ -107,7 +107,10 @@ export class DemoSecurityService {
    * Unsigned or invalid links strictly run in SANDBOX_SIMULATION mode.
    */
   verifyDemoContext(rawParams: Record<string, unknown>): DemoContextVerification {
-    const parsed = DemoQueryParamsSchema.parse(rawParams);
+    const safeResult = DemoQueryParamsSchema.safeParse(rawParams);
+    const parsed = safeResult.success
+      ? safeResult.data
+      : DemoQueryParamsSchema.parse({});
     const phoneValidation = validateAndFormatPhone(parsed.phone);
     const cleanPhone = phoneValidation.isValid ? phoneValidation.e164 : parsed.phone;
 

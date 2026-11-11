@@ -57,13 +57,17 @@ export function decryptTenantSecret(storedValue?: string | null): string | null 
     if (parts.length !== 3) return null;
 
     const [ivHex, tagHex, cipherHex] = parts;
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(ivHex, 'hex'));
-    decipher.setAuthTag(Buffer.from(tagHex, 'hex'));
+    const ivBuf = Buffer.from(ivHex, 'hex');
+    const tagBuf = Buffer.from(tagHex, 'hex');
+    const cipherBuf = Buffer.from(cipherHex, 'hex');
+    if (ivBuf.length !== 12 || tagBuf.length !== 16 || cipherBuf.length === 0) {
+      return null;
+    }
 
-    const decrypted = Buffer.concat([
-      decipher.update(Buffer.from(cipherHex, 'hex')),
-      decipher.final(),
-    ]);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, ivBuf);
+    decipher.setAuthTag(tagBuf);
+
+    const decrypted = Buffer.concat([decipher.update(cipherBuf), decipher.final()]);
     return decrypted.toString('utf8');
   } catch (err) {
     console.error('Failed to decrypt tenant secret:', err);

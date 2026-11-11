@@ -60,7 +60,7 @@ export const DemoQueryParamsSchema = z.object({
     .transform((val) => sanitizePlainText(val || 'Instant Estimator Corp', 80) || 'Instant Estimator Corp'),
   color: z
     .string()
-    .max(16)
+    .max(128)
     .optional()
     .transform((val) => sanitizeHexColor(val, '2563EB')),
   phone: z
