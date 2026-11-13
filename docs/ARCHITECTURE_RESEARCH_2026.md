@@ -4,7 +4,7 @@
 
 ### Meta WhatsApp Cloud API
 - **Cloud-Only Standard:** Meta retired the On-Premises WhatsApp API in October 2025; WhatsApp Cloud API (`graph.facebook.com`) is the sole supported architecture.
-- **Graph API Versioning:** Meta enforces a 24-month deprecation window per version. Versions up to `v26.0` (released July 29, 2026) and `v27.0` are active; `v20.0` (released May 2024) hit its 24-month retirement window in 2026. `MetaWhatsAppAdapter` defaults to `v26.0` (configurable via `WHATSAPP_GRAPH_API_VERSION`).
+- **Graph API versioning.** See the [November lifecycle and Kenya tariff review](KENYA_LAUNCH.md). The adapter defaults to v27.0.
 - **Billing & Quality Guardrails:** Meta shifted from conversation-based billing to per-delivered-template-message billing (Marketing, Utility, Authentication) and meters free-form service replies beyond the 1,000 monthly free service-message allowance. `WATERFALL_PROD` mode minimizes unnecessary dual-channel spend while preserving sub-second lead acknowledgment.
 - **Webhook Security:** Requests carry `X-Hub-Signature-256: sha256=<hex>` computed over the raw request body using `WHATSAPP_APP_SECRET`, verified via constant-time `crypto.timingSafeEqual`.
 
