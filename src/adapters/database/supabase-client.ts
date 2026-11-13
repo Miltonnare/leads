@@ -30,7 +30,6 @@ export function getPooledServiceSupabaseClient(): SupabaseClient<Database> {
   }
 
   const supabaseUrl =
-    process.env.SUPABASE_POOLER_URL ||
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     'https://demo-chameleon-project.supabase.co';
   const serviceRoleKey =

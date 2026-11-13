@@ -26,6 +26,8 @@ import type { Database, Json } from './database.types';
 import { isSupabaseConfigured } from './supabase-client';
 
 export class SupabaseLeadRepository implements LeadRepository, TenantResolver {
+  private readonly sandboxLeads = new Map<string, { id: string; expires: number }>();
+
   constructor(private readonly supabase: SupabaseClient<Database>) {}
 
   async resolveBySlug(slug: string): Promise<TenantConfig | null> {
@@ -71,6 +73,7 @@ export class SupabaseLeadRepository implements LeadRepository, TenantResolver {
   async ingestLeadAtomic(params: IngestLeadParams): Promise<IngestLeadAtomicResult> {
     // Graceful dry-run fallback only when Supabase env vars are not configured
     if (!isSupabaseConfigured()) {
+      if (params.executionMode === 'LIVE_DISPATCH') throw new Error('Live intake requires a configured database');
       return this.buildUnconfiguredFallbackResult(params);
     }
 
@@ -124,6 +127,14 @@ export class SupabaseLeadRepository implements LeadRepository, TenantResolver {
     if (error) {
       console.error('Failed to update lead dispatch status:', error.message);
     }
+  }
+
+  async claimCustomerFallback(leadId: string, organizationId: string, phone: string): Promise<boolean> {
+    const { data, error } = await this.supabase.rpc('claim_customer_fallback', {
+      p_lead_id: leadId, p_org_id: organizationId, p_phone: phone,
+    });
+    if (error) throw error;
+    return data === true;
   }
 
   async getLeadStatus(leadId: string): Promise<{
@@ -387,9 +398,18 @@ export class SupabaseLeadRepository implements LeadRepository, TenantResolver {
   }
 
   private buildUnconfiguredFallbackResult(params: IngestLeadParams): IngestLeadAtomicResult {
+    const now = Date.now();
+    for (const [key, entry] of this.sandboxLeads) {
+      if (entry.expires <= now) this.sandboxLeads.delete(key);
+      else break;
+    }
+    const key = params.organizationSlug + ':' + params.phoneE164;
+    const existing = this.sandboxLeads.get(key);
+    const id = existing?.id ?? crypto.randomUUID();
+    if (!existing) this.sandboxLeads.set(key, { id, expires: now + 600_000 });
     return {
-      lead_id: crypto.randomUUID(),
-      is_duplicate: false,
+      lead_id: id,
+      is_duplicate: Boolean(existing),
       existing_status: null,
       tenant_config: {
         id: '00000000-0000-0000-0000-000000000001',

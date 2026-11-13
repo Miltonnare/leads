@@ -182,6 +182,13 @@ class InMemoryLeadRepository {
     lead.db_latency_ms = dbLatencyMs;
   }
 
+  async claimCustomerFallback(id) {
+    const lead = this.leads.get(id);
+    if (!lead || lead.claimed || LEAD_STATUS_RANK[lead.status] >= 40) return false;
+    lead.claimed = true;
+    return true;
+  }
+
   async getLeadStatus(leadId) {
     const lead = this.leads.get(leadId);
     if (!lead) return null;
@@ -346,6 +353,11 @@ test('1. Domain validation: E.164 normalization, XSS sanitization, GSM-7 SMS, an
     serviceRequested: 'Turnkey Commercial Borehole (180m–220m) 🚀',
   });
   assert.ok(customerSms.length <= 160);
+  const extended = formatCompactCustomerSms({
+    clientName: '^'.repeat(28), customerName: '€'.repeat(20), serviceRequested: '['.repeat(200),
+  });
+  assert.ok(extended.length + (extended.match(/[\^€\[]/g) ?? []).length <= 160);
+  assert.ok(extended.endsWith('opt out.'));
   assert.equal(isStrictlyGsm7(customerSms), true);
   assert.equal(sanitizeToGsm7('6–8 Teeth “Premium”'), '6-8 Teeth "Premium"');
 
@@ -403,7 +415,7 @@ test('2. Security: AES-256-GCM token encryption, HMAC demo signing & sliding-win
   assert.equal(phoneBlocked.reason, 'PHONE_RATE_LIMIT');
 });
 
-test('3. Providers: Meta Graph API v26.0 retries & Africa Talking sender ID fallback + GSM-7', async () => {
+test('3. Providers: Meta Graph API v27.0 retries & Africa Talking sender ID fallback + GSM-7', async () => {
   process.env.TOKEN_ENCRYPTION_KEY = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
   process.env.AFRICASTALKING_API_KEY = 'atsk_test_key';
   process.env.AFRICASTALKING_USERNAME = 'sandbox';
@@ -472,7 +484,7 @@ test('3. Providers: Meta Graph API v26.0 retries & Africa Talking sender ID fall
     });
     assert.equal(waRes.success, true);
     assert.equal(waRes.providerMessageId, 'wamid.TEST123');
-    assert.ok(fetchCalls[0].url.includes('/v26.0/9988776655/messages'));
+    assert.ok(fetchCalls[0].url.includes('/v27.0/9988776655/messages'));
     assert.equal(fetchCalls[0].init.headers.Authorization, 'Bearer TENANT_WABA_SECRET');
 
     const atAdapter = new AfricasTalkingAdapter({ maxRetries: 0 });

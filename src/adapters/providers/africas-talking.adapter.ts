@@ -200,14 +200,12 @@ export class AfricasTalkingAdapter implements MessagingProvider<SmsDispatchReque
           rawText ||
           `AT HTTP ${res.status}`;
 
-        if (!(res.status === 429 || res.status >= 500) || attempt === this.maxRetries) {
+        if (res.status !== 429 || attempt === this.maxRetries) {
           break;
         }
       } catch (err) {
         lastError = err instanceof Error ? err.message : "Africa's Talking network error";
-        if (attempt === this.maxRetries) {
-          break;
-        }
+        break;
       }
 
       const baseMs = 150 * Math.pow(2, attempt);

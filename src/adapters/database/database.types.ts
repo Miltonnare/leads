@@ -382,6 +382,10 @@ export interface Database {
         };
         Returns: Json;
       };
+      claim_customer_fallback: {
+        Args: { p_lead_id: string; p_org_id: string; p_phone: string };
+        Returns: boolean;
+      };
       record_phone_opt_out: {
         Args: {
           p_phone_e164: string;

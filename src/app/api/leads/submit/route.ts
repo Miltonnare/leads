@@ -47,7 +47,6 @@ export async function POST(req: NextRequest) {
         success: false,
         status: 'FAILED',
         error: 'Internal server error during lead intake processing',
-        message: err instanceof Error ? err.message : 'Unknown error',
       },
       { status: 500 }
     );

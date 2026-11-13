@@ -11,6 +11,7 @@
 --   6. Owner 1-tap SLA click-tracking columns & atomic tracking RPC
 -- ============================================================================
 
+BEGIN;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "citext";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -83,6 +84,9 @@ EXCEPTION
 END $$;
 
 ALTER TYPE dispatch_status_enum ADD VALUE IF NOT EXISTS 'SIMULATED';
+-- PostgreSQL requires new enum labels to commit before first use.
+COMMIT;
+BEGIN;
 
 DO $$ BEGIN
     CREATE TYPE webhook_provider_enum AS ENUM (
@@ -116,8 +120,8 @@ CREATE TABLE IF NOT EXISTS organizations (
         "waterfall_sms_delay_ms": 15000,
         "working_hours_only": false
     }'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW())
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Idempotent column upgrades for existing prototype databases
@@ -150,7 +154,7 @@ CREATE TABLE IF NOT EXISTS leads (
     owner_clicked_wa_at TIMESTAMPTZ DEFAULT NULL,
     sla_escalated_at TIMESTAMPTZ DEFAULT NULL,
     customer_replied_at TIMESTAMPTZ DEFAULT NULL,
-    consent_accepted BOOLEAN NOT NULL DEFAULT true,
+    consent_accepted BOOLEAN NOT NULL DEFAULT false,
     consent_accepted_at TIMESTAMPTZ DEFAULT NULL,
     privacy_notice_version VARCHAR(32) NOT NULL DEFAULT '2026-11-odpc-v1',
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -162,8 +166,8 @@ CREATE TABLE IF NOT EXISTS leads (
         "ip_address": null,
         "user_agent": null
     }'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW())
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS execution_mode execution_mode_enum NOT NULL DEFAULT 'LIVE_DISPATCH';
@@ -171,7 +175,7 @@ ALTER TABLE leads ADD COLUMN IF NOT EXISTS db_latency_ms INTEGER DEFAULT NULL;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS owner_clicked_call_at TIMESTAMPTZ DEFAULT NULL;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS owner_clicked_wa_at TIMESTAMPTZ DEFAULT NULL;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS sla_escalated_at TIMESTAMPTZ DEFAULT NULL;
-ALTER TABLE leads ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMPTZ DEFAULT NULL;
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS privacy_notice_version VARCHAR(32) NOT NULL DEFAULT '2026-11-odpc-v1';
 
@@ -196,7 +200,7 @@ CREATE TABLE IF NOT EXISTS phone_opt_outs (
     organization_id UUID REFERENCES organizations(id) ON DELETE CASCADE,
     source VARCHAR(32) NOT NULL DEFAULT 'inbound_stop',
     reason TEXT DEFAULT NULL,
-    opted_out_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW())
+    opted_out_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_phone_opt_outs_scope
@@ -216,7 +220,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     message_body TEXT NOT NULL,
     delivery_status VARCHAR(32) NOT NULL DEFAULT 'SENT',
     raw_payload JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW())
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_conversations_lead ON conversations(lead_id, created_at ASC);
@@ -237,7 +241,7 @@ CREATE TABLE IF NOT EXISTS lead_dispatches (
     request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
     response_payload JSONB DEFAULT '{}'::jsonb,
     error_message TEXT DEFAULT NULL,
-    dispatched_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW()),
+    dispatched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     acknowledged_at TIMESTAMPTZ DEFAULT NULL
 );
 
@@ -258,7 +262,7 @@ CREATE TABLE IF NOT EXISTS webhook_events (
     status VARCHAR(64) NOT NULL,
     lead_id UUID REFERENCES leads(id) ON DELETE SET NULL,
     raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-    processed_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW()),
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT uq_webhook_events_idempotency UNIQUE (provider, provider_message_id, status)
 );
 
@@ -288,7 +292,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     actor_id VARCHAR(64) NOT NULL,
     details JSONB NOT NULL DEFAULT '{}'::jsonb,
     ip_address INET DEFAULT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT TIMEZONE('UTC', NOW())
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created ON audit_logs(organization_id, created_at DESC);
@@ -299,7 +303,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_org_created ON audit_logs(organization
 CREATE OR REPLACE FUNCTION trigger_set_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.updated_at = TIMEZONE('UTC', NOW());
+    NEW.updated_at = NOW();
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -415,7 +419,7 @@ CREATE OR REPLACE FUNCTION ingest_lead_atomic(
     p_execution_mode execution_mode_enum,
     p_metadata JSONB,
     p_attribution JSONB,
-    p_consent_accepted BOOLEAN DEFAULT true,
+    p_consent_accepted BOOLEAN DEFAULT false,
     p_privacy_notice_version TEXT DEFAULT '2026-11-odpc-v1'
 )
 RETURNS JSONB
@@ -432,7 +436,7 @@ DECLARE
     v_lock_key BIGINT;
     v_effective_owner_phone TEXT;
     v_is_opted_out BOOLEAN := false;
-    v_now TIMESTAMPTZ := TIMEZONE('UTC', NOW());
+    v_now TIMESTAMPTZ := NOW();
 BEGIN
     -- Serialize concurrent requests for the exact same (tenant, phone_e164) pair.
     -- Uses transaction-scoped pg_advisory_xact_lock (safe under Supavisor transaction pooling;
@@ -488,7 +492,7 @@ BEGIN
             'PARALLEL_DEMO'
         )
         ON CONFLICT (slug) DO UPDATE
-            SET updated_at = TIMEZONE('UTC', NOW())
+            SET updated_at = NOW()
         RETURNING
             id,
             slug,
@@ -507,7 +511,7 @@ BEGIN
 
     -- 3. Check sliding-window deduplication (default 10 minutes)
     v_dedup_minutes := GREATEST(1, COALESCE((v_org.settings->>'dedup_window_minutes')::INTEGER, 10));
-    v_dedup_cutoff := TIMEZONE('UTC', NOW()) - MAKE_INTERVAL(mins => v_dedup_minutes);
+    v_dedup_cutoff := NOW() - MAKE_INTERVAL(mins => v_dedup_minutes);
 
     SELECT id, status, created_at
     INTO v_existing_lead
@@ -574,8 +578,8 @@ BEGIN
         COALESCE(p_estimated_value_kes, 0.00),
         'PENDING',
         p_execution_mode,
-        COALESCE(p_consent_accepted, true),
-        CASE WHEN COALESCE(p_consent_accepted, true) THEN v_now ELSE NULL END,
+        COALESCE(p_consent_accepted, false),
+        CASE WHEN COALESCE(p_consent_accepted, false) THEN v_now ELSE NULL END,
         COALESCE(NULLIF(TRIM(p_privacy_notice_version), ''), '2026-11-odpc-v1'),
         COALESCE(p_metadata, '{}'::jsonb),
         COALESCE(p_attribution, '{}'::jsonb)
@@ -680,7 +684,7 @@ BEGIN
     IF p_dispatch_status IS NOT NULL THEN
         UPDATE lead_dispatches
         SET
-            acknowledged_at = COALESCE(acknowledged_at, TIMEZONE('UTC', NOW())),
+            acknowledged_at = COALESCE(acknowledged_at, NOW()),
             status = p_dispatch_status
         WHERE provider_message_id = p_provider_message_id;
     END IF;
@@ -691,7 +695,7 @@ BEGIN
         SET
             status = p_lead_target_status,
             customer_replied_at = CASE
-                WHEN p_lead_target_status = 'CUSTOMER_REPLIED' THEN COALESCE(customer_replied_at, TIMEZONE('UTC', NOW()))
+                WHEN p_lead_target_status = 'CUSTOMER_REPLIED' THEN COALESCE(customer_replied_at, NOW())
                 ELSE customer_replied_at
             END
         WHERE id = v_lead_id;
@@ -716,7 +720,7 @@ AS $$
 DECLARE
     v_lead RECORD;
     v_org RECORD;
-    v_now TIMESTAMPTZ := TIMEZONE('UTC', NOW());
+    v_now TIMESTAMPTZ := NOW();
     v_action TEXT;
 BEGIN
     SELECT id, organization_id, raw_name, phone_e164, service_requested, status
@@ -797,7 +801,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-    v_now TIMESTAMPTZ := TIMEZONE('UTC', NOW());
+    v_now TIMESTAMPTZ := NOW();
     v_window_epoch BIGINT;
     v_current_window TIMESTAMPTZ;
     v_prev_window TIMESTAMPTZ;
@@ -874,7 +878,7 @@ BEGIN
     VALUES (TRIM(p_phone_e164), p_organization_id, p_source, p_reason)
     ON CONFLICT (phone_e164, COALESCE(organization_id, '00000000-0000-0000-0000-000000000000'::uuid))
     DO UPDATE SET
-        opted_out_at = TIMEZONE('UTC', NOW()),
+        opted_out_at = NOW(),
         source = EXCLUDED.source,
         reason = EXCLUDED.reason;
 END;
@@ -892,7 +896,7 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-    v_now TIMESTAMPTZ := TIMEZONE('UTC', NOW());
+    v_now TIMESTAMPTZ := NOW();
     v_expired_count INTEGER := 0;
     v_escalated JSONB := '[]'::jsonb;
 BEGIN
@@ -1028,7 +1032,35 @@ DROP POLICY IF EXISTS service_role_all_audit_logs ON audit_logs;
 CREATE POLICY service_role_all_audit_logs ON audit_logs
     FOR ALL TO service_role USING (true) WITH CHECK (true);
 
--- Restricted public read policy for active demo organizations (no tokens exposed via view/select in app)
 DROP POLICY IF EXISTS anon_read_demo_organizations ON organizations;
-CREATE POLICY anon_read_demo_organizations ON organizations
-    FOR SELECT TO anon USING (is_active = true);
+
+ALTER TABLE leads ALTER COLUMN consent_accepted SET DEFAULT false;
+ALTER TABLE leads ADD COLUMN IF NOT EXISTS fallback_claimed_at TIMESTAMPTZ;
+CREATE OR REPLACE FUNCTION claim_customer_fallback(p_lead_id UUID, p_org_id UUID, p_phone TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql SET search_path = public AS $$
+BEGIN
+    UPDATE leads l SET fallback_claimed_at = now()
+    WHERE l.id = p_lead_id AND l.organization_id = p_org_id AND l.phone_e164 = p_phone
+      AND l.execution_mode = 'LIVE_DISPATCH' AND l.consent_accepted AND l.fallback_claimed_at IS NULL
+      AND lead_status_rank(l.status) < lead_status_rank('DELIVERED')
+      AND NOT EXISTS (SELECT 1 FROM phone_opt_outs o WHERE o.phone_e164 = l.phone_e164
+          AND (o.organization_id IS NULL OR o.organization_id = l.organization_id))
+      AND NOT EXISTS (SELECT 1 FROM lead_dispatches d WHERE d.lead_id = l.id AND d.channel = 'AFRICAS_TALKING_SMS');
+    RETURN FOUND;
+END $$;
+
+REVOKE EXECUTE ON FUNCTION ingest_lead_atomic(TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT, TEXT, TEXT, TEXT, NUMERIC, execution_mode_enum, JSONB, JSONB, BOOLEAN, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION ingest_lead_atomic(TEXT, TEXT, TEXT, TEXT, TEXT, BOOLEAN, TEXT, TEXT, TEXT, TEXT, NUMERIC, execution_mode_enum, JSONB, JSONB, BOOLEAN, TEXT) TO service_role;
+REVOKE EXECUTE ON FUNCTION apply_webhook_event_atomic(webhook_provider_enum, TEXT, TEXT, lead_status_enum, TEXT, dispatch_status_enum, JSONB) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION apply_webhook_event_atomic(webhook_provider_enum, TEXT, TEXT, lead_status_enum, TEXT, dispatch_status_enum, JSONB) TO service_role;
+REVOKE EXECUTE ON FUNCTION record_owner_click_sla(UUID, TEXT, INET, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION record_owner_click_sla(UUID, TEXT, INET, TEXT) TO service_role;
+REVOKE EXECUTE ON FUNCTION check_rate_limit_sliding_window(TEXT, INTEGER, INTEGER) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION check_rate_limit_sliding_window(TEXT, INTEGER, INTEGER) TO service_role;
+REVOKE EXECUTE ON FUNCTION record_phone_opt_out(TEXT, UUID, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION record_phone_opt_out(TEXT, UUID, TEXT, TEXT) TO service_role;
+REVOKE EXECUTE ON FUNCTION claim_overdue_sla_leads(INTEGER, INTEGER, INTEGER) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION claim_overdue_sla_leads(INTEGER, INTEGER, INTEGER) TO service_role;
+REVOKE EXECUTE ON FUNCTION claim_customer_fallback(UUID, UUID, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION claim_customer_fallback(UUID, UUID, TEXT) TO service_role;
+COMMIT;

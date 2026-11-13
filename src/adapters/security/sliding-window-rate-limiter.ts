@@ -82,37 +82,25 @@ export class SlidingWindowRateLimiter implements RateLimiter {
     const member = `${nowMs}-${Math.random().toString(36).slice(2, 10)}`;
     const redisKey = `rl:${bucketKey}`;
 
-    const pipeline = [
-      ['ZREMRANGEBYSCORE', redisKey, 0, cutoffMs],
-      ['ZCARD', redisKey],
-      ['ZADD', redisKey, nowMs, member],
-      ['PEXPIRE', redisKey, windowMs],
-    ];
-
-    const res = await fetch(`${baseUrl.replace(/\/$/, '')}/pipeline`, {
+    const script = [
+      "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])",
+      "local count = redis.call('ZCARD', KEYS[1])",
+      "if count >= tonumber(ARGV[2]) then return count end",
+      "redis.call('ZADD', KEYS[1], ARGV[3], ARGV[4])",
+      "redis.call('PEXPIRE', KEYS[1], ARGV[5])",
+      "return count",
+    ].join('\n');
+    const res = await fetch(baseUrl, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(pipeline),
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(['EVAL', script, 1, redisKey, cutoffMs, limit, nowMs, member, windowMs]),
       signal: AbortSignal.timeout(1200),
     });
-
-    if (!res.ok) {
-      throw new Error(`Upstash pipeline HTTP ${res.status}`);
-    }
-
-    const results = (await res.json()) as Array<{ result?: unknown }>;
-    const currentCount = Number(results?.[1]?.result ?? 0);
-
+    if (!res.ok) throw new Error('Redis rate limiter HTTP ' + res.status);
+    const payload: { result?: unknown } = await res.json();
+    const currentCount = payload.result;
+    if (typeof currentCount !== 'number') throw new Error('Invalid Redis rate limit result');
     if (currentCount >= limit) {
-      // Undo speculative ZADD so blocked callers do not extend their own lockout
-      await fetch(`${baseUrl.replace(/\/$/, '')}/zrem/${encodeURIComponent(redisKey)}/${encodeURIComponent(member)}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => undefined);
-
       return {
         allowed: false,
         remaining: 0,

@@ -85,6 +85,8 @@ export interface LeadRepository {
     dbLatencyMs?: number
   ): Promise<void>;
 
+  claimCustomerFallback(leadId: string, organizationId: string, phone: string): Promise<boolean>;
+
   getLeadStatus(leadId: string): Promise<{
     id: string;
     status: LeadStatus;

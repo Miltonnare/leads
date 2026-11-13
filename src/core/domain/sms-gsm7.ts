@@ -18,6 +18,10 @@ const GSM7_BASIC_AND_EXT_ALLOWED =
  * Normalizes smart punctuation and strips non-GSM-7 Unicode characters
  * so SMS gateways keep standard 160-character GSM-7 segmentation.
  */
+function septets(text: string): number {
+  return text.length + (text.match(/[\^{}\\\[~\]|€]/g)?.length ?? 0);
+}
+
 export function sanitizeToGsm7(input: string, maxLength?: number): string {
   const normalized = input
     .replace(/[\u2013\u2014\u2212]/g, '-')
@@ -26,11 +30,20 @@ export function sanitizeToGsm7(input: string, maxLength?: number): string {
     .replace(/\u2026/g, '...')
     .replace(/\u00A0/g, ' ')
     .replace(/[^\x20-\x7E\n\r£¥èéùìòÇØøÅåΔΦΓΛΩΠΨΣΘΞÆæßÉ¡ÄÖÑÜ§¿äöñüà€]/g, '')
+    .replace(/`/g, "'")
     .replace(/[ \t]+/g, ' ')
     .trim();
 
-  if (typeof maxLength === 'number' && normalized.length > maxLength) {
-    return normalized.slice(0, Math.max(0, maxLength - 3)).trimEnd() + '...';
+  if (typeof maxLength === 'number' && septets(normalized) > maxLength) {
+    const suffix = '.'.repeat(Math.max(0, Math.min(3, maxLength)));
+    let used = suffix.length;
+    let prefix = '';
+    for (const char of normalized) {
+      used += septets(char);
+      if (used > maxLength) break;
+      prefix += char;
+    }
+    return prefix.trimEnd() + suffix;
   }
   return normalized;
 }
@@ -138,11 +151,11 @@ export function formatCompactCustomerSms(params: {
   const prefix = `${client}: Hi ${firstName}, we received your request for "`;
   const suffix = `". A specialist will call shortly. Reply STOP to opt out.`;
 
-  const remainingForService = Math.max(12, 160 - prefix.length - suffix.length);
+  const remainingForService = 160 - septets(prefix + suffix);
   const service = sanitizeToGsm7(params.serviceRequested, remainingForService);
 
   const full = `${prefix}${service}${suffix}`;
-  return full.length <= 160 ? full : sanitizeToGsm7(full, 160);
+  return full;
 }
 
 /**

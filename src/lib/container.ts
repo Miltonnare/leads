@@ -3,7 +3,7 @@
  * Wires adapters into application services for thin Next.js route handlers.
  */
 
-import { getPooledServiceSupabaseClient } from '@/adapters/database/supabase-client';
+import { getPooledServiceSupabaseClient, isSupabaseConfigured } from '@/adapters/database/supabase-client';
 import { SupabaseLeadRepository } from '@/adapters/database/supabase-lead.repository';
 import { AfricasTalkingAdapter } from '@/adapters/providers/africas-talking.adapter';
 import { MetaWhatsAppAdapter } from '@/adapters/providers/meta-whatsapp.adapter';
@@ -28,7 +28,7 @@ export function getAppServices(): AppServices {
 
   const supabase = getPooledServiceSupabaseClient();
   const repository = new SupabaseLeadRepository(supabase);
-  const rateLimiter = new SlidingWindowRateLimiter(supabase);
+  const rateLimiter = new SlidingWindowRateLimiter(isSupabaseConfigured() ? supabase : null);
   const demoSecurityService = new DemoSecurityService(rateLimiter);
   const whatsappProvider = new MetaWhatsAppAdapter();
   const smsProvider = new AfricasTalkingAdapter();

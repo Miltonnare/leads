@@ -9,7 +9,6 @@ import {
   formatCompactOwnerAlertSms,
   formatSlaEscalationSms,
   getNichePreset,
-  isLeadAlreadyDeliveredOrReplied,
   LeadSubmissionSchema,
   normalizeNicheKey,
   toTenantSlug,
@@ -117,18 +116,10 @@ export class LeadDispatchService {
 
     const executionMode: ExecutionMode = demoVerification.executionMode;
     const sanitized = demoVerification.sanitizedParams;
-    const nicheKey = normalizeNicheKey(
-      typeof input.metadata?.niche === 'string' ? input.metadata.niche : sanitized.niche
-    );
+    const nicheKey = normalizeNicheKey(sanitized.niche);
     const nichePreset = getNichePreset(nicheKey, sanitized.client);
-
-    const resolvedOwnerPhone = input.ownerPhone
-      ? validateAndFormatPhone(input.ownerPhone).e164 || sanitized.phone
-      : sanitized.phone;
-
-    const orgSlug = input.demoContext?.client
-      ? toTenantSlug(sanitized.client)
-      : input.organizationSlug;
+    const resolvedOwnerPhone = sanitized.phone;
+    const orgSlug = demoVerification.isSignedLive ? toTenantSlug(sanitized.client) : '_sandbox';
 
     // 5. Single-roundtrip atomic ingestion + advisory-locked sliding-window dedup
     const tDb0 = Date.now();
@@ -394,7 +385,7 @@ export class LeadDispatchService {
 
     // If Meta failed immediately, fire SMS fallback right away
     if (!waRes || !waRes.success) {
-      await this.sendAndRecordCustomerSms({
+      await this.executeWaterfallSmsFallback({
         leadId,
         tenant,
         customerPhoneE164,
@@ -443,10 +434,8 @@ export class LeadDispatchService {
     customerName: string;
     serviceRequested: string;
   }): Promise<{ skipped: boolean; reason?: string }> {
-    const currentLead = await this.repository.getLeadStatus(params.leadId);
-    if (currentLead && isLeadAlreadyDeliveredOrReplied(currentLead.status)) {
-      return { skipped: true, reason: `Lead already at status ${currentLead.status}` };
-    }
+    const claimed = await this.repository.claimCustomerFallback(params.leadId, params.tenant.id, params.customerPhoneE164);
+    if (!claimed) return { skipped: true, reason: 'Fallback unavailable or already claimed' };
 
     await this.sendAndRecordCustomerSms(params);
     return { skipped: false };

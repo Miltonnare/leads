@@ -43,7 +43,7 @@ export function decryptTenantSecret(storedValue?: string | null): string | null 
 
   if (!storedValue.startsWith(PREFIX)) {
     // Allow legacy/plaintext value only if explicitly stored without prefix
-    return storedValue;
+    return null;
   }
 
   const key = getEncryptionKey();
@@ -57,6 +57,8 @@ export function decryptTenantSecret(storedValue?: string | null): string | null 
     if (parts.length !== 3) return null;
 
     const [ivHex, tagHex, cipherHex] = parts;
+    if (!/^[0-9a-f]{24}$/i.test(ivHex) || !/^[0-9a-f]{32}$/i.test(tagHex) ||
+        !/^(?:[0-9a-f]{2})+$/i.test(cipherHex)) return null;
     const ivBuf = Buffer.from(ivHex, 'hex');
     const tagBuf = Buffer.from(tagHex, 'hex');
     const cipherBuf = Buffer.from(cipherHex, 'hex');

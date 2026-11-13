@@ -1,6 +1,6 @@
 /**
  * Meta WhatsApp Cloud API Adapter
- * Isolated Graph API v26.0 client with per-tenant credential resolution, master fallback,
+ * Isolated Graph API v27.0 client with per-tenant credential resolution, master fallback,
  * template payload builder, strict typing, bounded timeouts, and exponential backoff retries.
  */
 
@@ -39,7 +39,7 @@ export class MetaWhatsAppAdapter implements MessagingProvider<WhatsAppTemplateRe
     this.graphApiVersion =
       config.graphApiVersion ||
       process.env.WHATSAPP_GRAPH_API_VERSION?.trim() ||
-      'v26.0';
+      'v27.0';
     this.timeoutMs = config.timeoutMs ?? 4500;
     this.maxRetries = config.maxRetries ?? 2;
   }
@@ -126,6 +126,10 @@ export class MetaWhatsAppAdapter implements MessagingProvider<WhatsAppTemplateRe
   ): { phoneNumberId: string; accessToken: string } | null {
     const tenantPhoneId = request.tenant.whatsapp_phone_number_id?.trim() || null;
     const tenantToken = decryptTenantSecret(request.tenant.whatsapp_access_token_encrypted);
+
+    if (tenantPhoneId || request.tenant.whatsapp_access_token_encrypted) {
+      return tenantPhoneId && tenantToken ? { phoneNumberId: tenantPhoneId, accessToken: tenantToken } : null;
+    }
 
     const phoneNumberId = tenantPhoneId || process.env.WHATSAPP_PHONE_NUMBER_ID?.trim() || null;
     const accessToken = tenantToken || process.env.WHATSAPP_CLOUD_API_TOKEN?.trim() || null;
