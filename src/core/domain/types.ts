@@ -106,7 +106,6 @@ export interface NichePreset {
   key: NicheKey;
   headline: string;
   subhead: string;
-  badge: string;
   services: string[];
   defaultService: string;
   cta: string;

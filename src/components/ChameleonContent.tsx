@@ -14,7 +14,7 @@ import {
   Zap,
 } from 'lucide-react';
 import {
-  DemoQueryParamsSchema,
+  type DemoContextVerification,
   getNichePreset,
   toTenantSlug,
   validateAndFormatPhone,
@@ -32,10 +32,9 @@ interface ParsedDemoConfig {
   brandColorRgb: string;
   ownerPhone: string;
   niche: NicheKey;
-  customServices?: string[];
   exp?: number;
   sig?: string;
-  hasSignatureParams: boolean;
+  verified: boolean;
 }
 
 function hexToRgbTriplet(hex: string): string {
@@ -56,30 +55,9 @@ function getInitials(name: string): string {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
-function parseSanitizedDemoParams(searchParams: URLSearchParams): ParsedDemoConfig {
-  const parsed = DemoQueryParamsSchema.safeParse({
-    client: searchParams.get('client') ?? undefined,
-    color: searchParams.get('color') ?? undefined,
-    phone: searchParams.get('phone') ?? undefined,
-    niche: searchParams.get('niche') ?? undefined,
-    services: searchParams.get('services') ?? undefined,
-    exp: searchParams.get('exp') ?? undefined,
-    sig: searchParams.get('sig') ?? undefined,
-  });
+type Preview = DemoContextVerification['sanitizedParams'];
 
-  if (!parsed.success) {
-    return {
-      clientName: 'Instant Estimator Corp',
-      organizationSlug: 'instant-estimator-corp',
-      brandColorHex: '#2563EB',
-      brandColorRgb: '37 99 235',
-      ownerPhone: '+254712345678',
-      niche: 'general',
-      hasSignatureParams: false,
-    };
-  }
-
-  const data = parsed.data;
+function parsePreview(data: Preview): ParsedDemoConfig {
   const brandColorHex = `#${data.color}`;
   return {
     clientName: data.client,
@@ -88,20 +66,19 @@ function parseSanitizedDemoParams(searchParams: URLSearchParams): ParsedDemoConf
     brandColorRgb: hexToRgbTriplet(brandColorHex),
     ownerPhone: data.phone,
     niche: data.niche,
-    customServices: data.services,
     exp: data.exp,
     sig: data.sig,
-    hasSignatureParams: Boolean(data.sig && data.exp),
+    verified: Boolean(data.sig && data.exp),
   };
 }
 
-export function ChameleonContent() {
+export function ChameleonContent({ preview }: { preview: Preview }) {
   const searchParams = useSearchParams();
 
   // 1. Sanitized URL parsing & safe CSS custom property injection
   const demoConfig = useMemo(
-    () => parseSanitizedDemoParams(new URLSearchParams(searchParams.toString())),
-    [searchParams]
+    () => parsePreview(preview),
+    [preview]
   );
 
   const themeStyle = useMemo(
@@ -118,10 +95,7 @@ export function ChameleonContent() {
     [demoConfig.niche, demoConfig.clientName]
   );
 
-  const serviceOptions = useMemo(
-    () => demoConfig.customServices ?? activeNiche.services,
-    [demoConfig.customServices, activeNiche.services]
-  );
+  const serviceOptions = activeNiche.services;
 
   const defaultServiceOption = serviceOptions[0] || activeNiche.defaultService;
 
@@ -159,7 +133,7 @@ export function ChameleonContent() {
 
   const phoneValidation = useMemo(() => validateAndFormatPhone(phone), [phone]);
   const isNameValid = fullName.trim().length >= 2;
-  const isServiceValid = resolvedServiceRequested.length >= 2;
+  const isServiceValid = resolvedServiceRequested.length >= 2 && resolvedServiceRequested.length <= 128;
   const showNameError = nameTouched && !isNameValid;
   const showPhoneError = phoneTouched && phone.trim().length > 0 && !phoneValidation.isValid;
   const showPhoneEmptyError = phoneTouched && phone.trim().length === 0;
@@ -293,7 +267,7 @@ export function ChameleonContent() {
           <div className="flex items-center gap-2.5 shrink-0">
             <a
               href={`tel:${demoConfig.ownerPhone}`}
-              className="hidden sm:inline-flex items-center gap-1.5 text-xs font-mono font-medium text-ink-muted hover:text-ink px-2.5 py-1.5 rounded-lg border border-surface-border bg-canvas transition-colors"
+              className="hidden sm:inline-flex min-h-[44px] items-center gap-1.5 text-xs font-mono font-medium text-ink-muted hover:text-ink px-2.5 py-1.5 rounded-lg border border-surface-border bg-canvas transition-colors"
             >
               <PhoneCall className="w-3.5 h-3.5 text-brand" />
               <span>{demoConfig.ownerPhone}</span>
@@ -302,10 +276,10 @@ export function ChameleonContent() {
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-surface-border bg-surface text-ink-muted">
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
-                  demoConfig.hasSignatureParams ? 'bg-emerald-500' : 'bg-amber-500'
+                  demoConfig.verified ? 'bg-brand' : 'bg-slate-500'
                 }`}
               />
-              <span>{demoConfig.hasSignatureParams ? 'Live Dispatch' : 'Sandbox'}</span>
+              <span>{demoConfig.verified ? 'Live Dispatch' : 'Sandbox'}</span>
             </span>
           </div>
         </div>
@@ -314,11 +288,7 @@ export function ChameleonContent() {
       {/* Main Content */}
       <main className="flex-1 w-full max-w-3xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
         {/* Compact Executive Hero */}
-        <section className="text-center max-w-2xl mx-auto mb-7 space-y-3">
-          <div className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-brand/10 text-brand">
-            {activeNiche.badge}
-          </div>
-
+        <section className="max-w-xl mx-auto mb-7 space-y-3 border-l-4 border-brand pl-5">
           <h1 className="text-2xl sm:text-4xl font-semibold tracking-tight text-ink leading-tight">
             {activeNiche.headline}
           </h1>
@@ -369,15 +339,15 @@ export function ChameleonContent() {
           <div className="p-5 sm:p-7">
             {activeTab === 'form' ? (
               submitResult && submitResult.success ? (
-                /* Soft Emerald Success Confirmation */
+                /* Submission confirmation */
                 <div className="space-y-5">
-                  <div className="rounded-xl bg-[#F0FDF4] border border-emerald-200 p-4 flex items-start gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="rounded-xl bg-canvas border border-brand/25 p-4 flex items-start gap-3">
+                    <CheckCircle2 className="w-5 h-5 text-brand shrink-0 mt-0.5" />
                     <div className="space-y-1 min-w-0">
                       <h2 className="text-sm font-semibold text-ink tracking-tight">
                         {submitResult.executionMode === 'SANDBOX_SIMULATION'
                           ? 'Estimate logged in sandbox simulation'
-                          : 'Request confirmed and specialist alerted'}
+                          : 'Request received'}
                       </h2>
                       <p className="text-xs text-ink-muted leading-relaxed">
                         {submitResult.message}
@@ -404,7 +374,7 @@ export function ChameleonContent() {
                     <div className="p-3 rounded-xl bg-canvas border border-surface-border">
                       <div className="text-[11px] font-medium text-ink-muted">Status</div>
                       <div className="inline-flex items-center gap-1.5 text-xs font-mono font-semibold text-ink mt-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-brand" />
                         <span>{submitResult.status}</span>
                       </div>
                     </div>
@@ -443,14 +413,14 @@ export function ChameleonContent() {
                     <button
                       type="button"
                       onClick={() => setActiveTab('telemetry')}
-                      className="font-medium text-brand hover:underline"
+                      className="min-h-[44px] font-medium text-brand hover:underline"
                     >
                       View speed breakdown
                     </button>
                     <button
                       type="button"
                       onClick={resetForm}
-                      className="font-medium text-ink-muted hover:text-ink"
+                      className="min-h-[44px] font-medium text-ink-muted hover:text-ink"
                     >
                       Submit another inquiry
                     </button>
@@ -460,8 +430,8 @@ export function ChameleonContent() {
                 /* Single-Column High-Converting Intake Form */
                 <form onSubmit={handleSubmit} noValidate className="space-y-4">
                   {submitResult && !submitResult.success && (
-                    <div className="rounded-xl bg-[#FFF1F2] border border-rose-200 p-3.5 flex items-start gap-2.5 text-rose-900">
-                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="rounded-xl bg-canvas border border-slate-600 p-3.5 flex items-start gap-2.5 text-ink">
+                      <AlertCircle className="w-4 h-4 text-ink shrink-0 mt-0.5" />
                       <div className="text-xs leading-relaxed">
                         <span className="font-semibold block">Submission blocked</span>
                         <span>{submitResult.error}</span>
@@ -479,8 +449,8 @@ export function ChameleonContent() {
                         Full Name or Company Contact
                       </label>
                       {nameTouched && isNameValid && (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-[#F0FDF4] px-2 py-0.5 rounded-full border border-emerald-200">
-                          <Check className="w-3 h-3" /> Verified
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-brand bg-canvas px-2 py-0.5 rounded-full border border-brand/25">
+                          <Check className="w-3 h-3" /> Valid format
                         </span>
                       )}
                     </div>
@@ -496,12 +466,12 @@ export function ChameleonContent() {
                       aria-invalid={showNameError}
                       className={`w-full h-11 px-3.5 rounded-xl text-sm text-ink placeholder:text-ink-muted/50 border transition-all focus:outline-none ${
                         showNameError
-                          ? 'bg-[#FFF1F2] border-rose-300 focus:border-rose-400 focus:ring-4 focus:ring-rose-100'
+                          ? 'bg-canvas border-slate-600 focus:border-slate-600 focus:ring-4 focus:ring-brand/20'
                           : 'bg-surface border-surface-border focus:border-brand focus:ring-4 focus:ring-brand/15'
                       }`}
                     />
                     {showNameError && (
-                      <p className="text-xs text-rose-700">
+                      <p className="text-xs text-ink">
                         Please enter at least 2 characters for your name.
                       </p>
                     )}
@@ -514,7 +484,7 @@ export function ChameleonContent() {
                         Mobile Phone Number
                       </label>
                       {phoneValidation.isValid ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-emerald-700 bg-[#F0FDF4] px-2 py-0.5 rounded-full border border-emerald-200">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-brand bg-canvas px-2 py-0.5 rounded-full border border-brand/25">
                           <Check className="w-3 h-3" />
                           <span>{phoneValidation.e164}</span>
                         </span>
@@ -536,12 +506,12 @@ export function ChameleonContent() {
                       aria-invalid={showPhoneError || showPhoneEmptyError}
                       className={`w-full h-11 px-3.5 rounded-xl text-sm font-mono text-ink placeholder:text-ink-muted/50 border transition-all focus:outline-none ${
                         showPhoneError || showPhoneEmptyError
-                          ? 'bg-[#FFF1F2] border-rose-300 focus:border-rose-400 focus:ring-4 focus:ring-rose-100'
+                          ? 'bg-canvas border-slate-600 focus:border-slate-600 focus:ring-4 focus:ring-brand/20'
                           : 'bg-surface border-surface-border focus:border-brand focus:ring-4 focus:ring-brand/15'
                       }`}
                     />
                     {(showPhoneError || showPhoneEmptyError) && (
-                      <p className="text-xs text-rose-700">
+                      <p className="text-xs text-ink">
                         Enter a valid Kenyan (07XX / 01XX / +254) or international mobile number.
                       </p>
                     )}
@@ -582,20 +552,20 @@ export function ChameleonContent() {
                           id="lead-custom-service"
                           type="text"
                           required
-                          maxLength={150}
+                          maxLength={128}
                           value={customServiceText}
                           onChange={(e) => setCustomServiceText(e.target.value)}
                           onBlur={() => setCustomServiceTouched(true)}
                           placeholder="Describe your specific project or service requirement..."
-                          aria-invalid={showCustomServiceError}
+                          aria-label="Custom project requirement" autoFocus aria-invalid={showCustomServiceError}
                           className={`w-full h-11 px-3.5 rounded-xl text-sm text-ink placeholder:text-ink-muted/50 border transition-all focus:outline-none ${
                             showCustomServiceError
-                              ? 'bg-[#FFF1F2] border-rose-300 focus:border-rose-400 focus:ring-4 focus:ring-rose-100'
+                              ? 'bg-canvas border-slate-600 focus:border-slate-600 focus:ring-4 focus:ring-brand/20'
                               : 'bg-surface border-surface-border focus:border-brand focus:ring-4 focus:ring-brand/15'
                           }`}
                         />
                         {showCustomServiceError && (
-                          <p className="text-xs text-rose-700">
+                          <p className="text-xs text-ink">
                             Please describe your project requirement (minimum 2 characters).
                           </p>
                         )}
@@ -607,7 +577,7 @@ export function ChameleonContent() {
                   <div
                     className={`rounded-xl border p-3 transition-colors ${
                       showConsentError
-                        ? 'bg-[#FFF1F2] border-rose-300'
+                        ? 'bg-canvas border-slate-600'
                         : 'bg-canvas border-surface-border'
                     }`}
                   >
@@ -624,10 +594,9 @@ export function ChameleonContent() {
                       <span>
                         I consent to{' '}
                         <strong className="text-ink font-medium">{demoConfig.clientName}</strong>{' '}
-                        contacting me via WhatsApp, SMS, or phone regarding this quote, and
-                        acknowledge the{' '}
+                        contacting me via WhatsApp, SMS, or phone about this quote. Read the{' '}
                         <a
-                          href={`/privacy?client=${encodeURIComponent(demoConfig.clientName)}&phone=${encodeURIComponent(demoConfig.ownerPhone)}`}
+                          href={preview.sig ? "/privacy?" + new URLSearchParams(Object.entries(preview).map(([key, value]) => [key, String(value)] as [string, string])) : "/privacy"}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-brand font-medium hover:underline"
@@ -638,7 +607,7 @@ export function ChameleonContent() {
                       </span>
                     </label>
                     {showConsentError && (
-                      <p className="text-xs text-rose-700 mt-1.5 pl-6">
+                      <p className="text-xs text-ink mt-1.5 pl-6">
                         Please confirm consent before submitting your request.
                       </p>
                     )}
@@ -759,9 +728,9 @@ export function ChameleonContent() {
                             <span
                               className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                                 item.status === 'COMPLETED'
-                                  ? 'bg-emerald-500'
+                                  ? 'bg-brand'
                                   : item.status === 'SIMULATED'
-                                    ? 'bg-amber-500'
+                                    ? 'bg-slate-500'
                                     : 'bg-brand'
                               }`}
                             />

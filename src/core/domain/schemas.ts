@@ -115,7 +115,7 @@ export const LeadSubmissionSchema = z.object({
     .string()
     .min(2, 'Full name must be at least 2 characters')
     .max(100)
-    .transform((val) => sanitizePlainText(val, 100)),
+    .transform((val) => sanitizePlainText(val, 100)).pipe(z.string().min(2)),
   phone: z.string().min(8).max(25),
   email: z
     .string()
@@ -127,7 +127,7 @@ export const LeadSubmissionSchema = z.object({
     .string()
     .min(2)
     .max(150)
-    .transform((val) => sanitizePlainText(val, 150)),
+    .transform((val) => sanitizePlainText(val, 150)).pipe(z.string().min(2).max(128)),
   organizationSlug: z
     .string()
     .min(2)

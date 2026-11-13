@@ -18,9 +18,7 @@ const STATIC_NICHES: Record<Exclude<NicheKey, 'general'>, NichePreset> = {
   borehole: {
     key: 'borehole',
     headline: 'Turnkey Hydro-Geological Survey & Borehole Drilling',
-    subhead:
-      'Instant technical quote: NEMA licensing, WRMA permits, solar submersible pumps, and 180m drilling estimates in 15 seconds.',
-    badge: 'WRMA & NEMA Certified Engineering Protocol',
+    subhead: "Choose the survey, drilling or pump work you need. A specialist will follow up about the site.",
     services: [
       'Turnkey Commercial Borehole (180m–220m)',
       'Agricultural Solar Pumping System',
@@ -28,15 +26,13 @@ const STATIC_NICHES: Record<Exclude<NicheKey, 'general'>, NichePreset> = {
       'Borehole Rehabilitation & Test Pumping',
     ],
     defaultService: 'Turnkey Commercial Borehole (180m–220m)',
-    cta: 'Calculate Drilling Quote & Dispatch Engineer',
+    cta: "Request a drilling estimate",
     estimatedValueKes: 1850000,
   },
   solar: {
     key: 'solar',
     headline: 'Commercial & Industrial Solar EPC Feasibility Assessment',
-    subhead:
-      'Sub-second PV capacity sizing, tier-1 bifacial panels, Huawei commercial inverters, and net-metering payback model.',
-    badge: 'EPRA Licensed Solar EPC Contractor',
+    subhead: "Choose your project type so an engineer can discuss the site, load and storage requirements.",
     services: [
       '65kWp Grid-Tied Commercial Rooftop',
       '120kWp Hybrid Factory Microgrid',
@@ -44,15 +40,13 @@ const STATIC_NICHES: Record<Exclude<NicheKey, 'general'>, NichePreset> = {
       'Commercial Battery Storage (BESS) Retrofit',
     ],
     defaultService: '65kWp Grid-Tied Commercial Rooftop',
-    cta: 'Calculate Solar Feasibility & Dispatch Quote',
+    cta: "Request a solar assessment",
     estimatedValueKes: 4200000,
   },
   vehicle: {
     key: 'vehicle',
     headline: 'Direct Japanese & UK Vehicle Import Clearance Estimate',
-    subhead:
-      'Instant CIF Mombasa landed calculation: KRA CRSP tax, port handling, KEBS inspection, and duty breakdown.',
-    badge: 'Authorized KRA / KEBS Direct Clearing Gateway',
+    subhead: "Select a vehicle or describe your fleet requirements to request a landed-cost estimate.",
     services: [
       'Toyota Land Cruiser Prado TX-L (2018/2019 Diesel)',
       'Mercedes-Benz GLE 350d (UK Direct)',
@@ -60,15 +54,13 @@ const STATIC_NICHES: Record<Exclude<NicheKey, 'general'>, NichePreset> = {
       'Commercial 10-Ton Tipper Truck (Isuzu Giga)',
     ],
     defaultService: 'Toyota Land Cruiser Prado TX-L (2018/2019 Diesel)',
-    cta: 'Generate Duty Breakdown & Auction Sheet',
+    cta: "Request an import estimate",
     estimatedValueKes: 5600000,
   },
   dental: {
     key: 'dental',
     headline: 'Priority Aesthetic Smile Design & Dental Consultation',
-    subhead:
-      'Lock your immediate clinic slot with Westlands / Karen senior dental surgeons within 60 seconds.',
-    badge: 'Board Certified Dental & Aesthetic Specialists',
+    subhead: "Select the consultation you would like. The clinic will contact you about availability.",
     services: [
       'Full Mouth Porcelain Veneers (6–8 Teeth)',
       'Invisalign Clear Aligners (Turnkey Course)',
@@ -76,15 +68,13 @@ const STATIC_NICHES: Record<Exclude<NicheKey, 'general'>, NichePreset> = {
       'Dental Implants (Titanium Single/Multiple)',
     ],
     defaultService: 'Full Mouth Porcelain Veneers (6–8 Teeth)',
-    cta: 'Confirm Consultation Slot on WhatsApp',
+    cta: "Request a consultation",
     estimatedValueKes: 280000,
   },
   plant: {
     key: 'plant',
     headline: 'Heavy Earthmoving Plant & Machinery Rental Quote',
-    subhead:
-      'Instant wet/dry lease rate cards for CAT excavators, bulldozers, and motor graders with mobilization schedules.',
-    badge: 'KeNHA / KURA Approved Plant Fleet',
+    subhead: "Choose equipment and tell the dispatcher about the site and hire period.",
     services: [
       'CAT 320 20-Ton Excavator (Monthly Wet Lease)',
       'CAT D6 Bulldozer Site Clearing Package',
@@ -92,7 +82,7 @@ const STATIC_NICHES: Record<Exclude<NicheKey, 'general'>, NichePreset> = {
       'JCB 3DX Backhoe Loader (Daily/Weekly)',
     ],
     defaultService: 'CAT 320 20-Ton Excavator (Monthly Wet Lease)',
-    cta: 'Dispatch Machinery Rate Card via WhatsApp',
+    cta: "Request a hire quote",
     estimatedValueKes: 950000,
   },
 };
@@ -110,10 +100,8 @@ export function getNichePreset(niche: NicheKey | string, clientName: string): Ni
 
   return {
     key: 'general',
-    headline: `Sub-Second Quote & Engineering Dispatch for ${clientName}`,
-    subhead:
-      'Our automated intake system locks your pricing and routes your request to a technical lead in under 15 seconds.',
-    badge: 'Zero-Latency Verified Intake Engine',
+    headline: `Request a project estimate from ${clientName}`,
+    subhead: "Select the work you need and share a callback number.",
     services: [
       'Project Quotation & Scope Estimate',
       'Site Survey & Technical Assessment',
@@ -123,7 +111,7 @@ export function getNichePreset(niche: NicheKey | string, clientName: string): Ni
       'Commercial Feasibility & Compliance Audit',
     ],
     defaultService: 'Project Quotation & Scope Estimate',
-    cta: 'Get Instant Quote via WhatsApp',
+    cta: "Request a callback",
     estimatedValueKes: 250000,
   };
 }
